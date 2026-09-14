@@ -102,6 +102,9 @@ JiuLi v0.1.0 启动中…
 ```
 
 - 收到/发出消息的内容都会记录（含图片大小、@、转发节点数等摘要），`config/config/bot.yaml → log_msg: false` 可关闭
+- 权限拒绝会明确回复（`没有权限哦，只有主人才可以使用！` 等）
+- 指令命中了规则但插件没响应时（如第三方插件内部自己判断主人后静默 return false），
+  框架会补一句提示（`config/config/bot.yaml → no_handler_tip: false` 可关闭）
 - 浏览器启动细节：程序路径 / 模式 / 参数 / 数据目录 / 重启与空闲策略，截图会记录模板、体积、耗时、累计张数
 - `#日志` 可直接把最近日志发到聊天里；日志文件在 `logs/jiuli.YYYY-MM-DD.log`（错误另存 `logs/error/`）
 

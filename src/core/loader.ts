@@ -426,6 +426,8 @@ class PluginsLoader {
         }
       }
 
+    /** 记录"命中了指令规则但没有插件响应"的情况，用于最后给出提示 */
+    const commandMatched: string[] = []
     for (const i of priority) {
       if (!i.plugin.rule) continue
       for (const v of i.plugin.rule) {
@@ -441,6 +443,8 @@ class PluginsLoader {
         e.logFnc = `${logger.blue(`[${i.name}(${fncName})]`)}`
         util.markPlugin(e, i.name, i.key)
         recentItem.matched = `${i.name} <${i.key}> → ${fncName}`
+        /** 指令型规则（不能匹配空串）才算"用户想执行指令" */
+        if (!(v.reg as RegExp).test('')) commandMatched.push(`${i.name}`)
 
         /** 命中日志：插件 / 来源文件 / 正则 / 执行方法 / 优先级 */
         util.makeLog(
@@ -489,7 +493,33 @@ class PluginsLoader {
     }
 
     util.makeLog('debug', `未命中插件 · ${scene} · ${util.truncate(e.msg || util.describeMsg(e.message))}`, 'Msg')
+
+    /**
+     * 命中了"指令型规则"（正则不匹配空串）但没有任何插件响应时给出提示，
+     * 避免像"非主人使用主人指令 → 插件内部 return false"这样静默无响应，让人以为框架坏了
+     */
+    if (
+      commandMatched.length &&
+      !e.__replied &&
+      cfg.bot.no_handler_tip !== false &&
+      e.message &&
+      e.msg
+    ) {
+      const key = `${e.self_id}.${e.user_id}`
+      const now = Date.now()
+      if (!this.hintThrottle[key] || now - this.hintThrottle[key] > 10000) {
+        this.hintThrottle[key] = now
+        const tip = e.isMaster
+          ? `这条指令没有被执行（参数或触发条件不符）· 可发 #插件列表 查看可用指令`
+          : `这条指令没有响应 · 如果它是主人专属指令，请先发 #设置主人 绑定主人账号；也可能是参数不符`
+        util.makeLog('info', `提示无响应 · ${util.truncate(e.msg, 20)} · 命中 ${commandMatched.join('/')}`, 'Msg')
+        await e.reply?.(tip)
+      }
+    }
   }
+
+  /** "无响应提示"节流（同一用户 10 秒内只提示一次） */
+  private hintThrottle: Record<string, number> = {}
 
   /** 过滤事件 */
   filtEvent(e: JiuLiEvent | null, v: any) {
@@ -512,17 +542,17 @@ class PluginsLoader {
     if (!v.permission || e.isMaster) return true
 
     if (v.permission === 'master') {
-      e.reply?.('暂无权限，只有主人才能操作')
+      e.reply?.('没有权限哦，只有主人才可以使用！')
       return false
     }
 
     if (e.isGroup) {
       if (v.permission === 'owner' && !e.member?.is_owner) {
-        e.reply?.('暂无权限，只有群主才能操作')
+        e.reply?.('没有权限哦，只有群主才可以使用！')
         return false
       }
       if (v.permission === 'admin' && !e.member?.is_owner && !e.member?.is_admin) {
-        e.reply?.('暂无权限，只有管理员才能操作')
+        e.reply?.('没有权限哦，只有群管理员才可以使用！')
         return false
       }
     }
@@ -659,6 +689,8 @@ class PluginsLoader {
         content,
         plugin: e.logPlugin || '',
       })
+      /** 标记"本事件已有插件尝试回复"，用于判断是否需要给"无响应"提示 */
+      e.__replied = true
 
       if (recallMsg > 0 && res?.message_id) {
         if (e.group?.recallMsg)

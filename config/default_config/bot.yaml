@@ -10,6 +10,8 @@ log_align: "  JiuLi  "
 log_msg: true
 # 消息内容预览长度
 log_msg_length: 60
+# 指令命中了规则但没有插件响应时，主动提示一句（如非主人使用主人指令）
+no_handler_tip: true
 # 插件加载超时
 plugin_load_timeout: 60
 # 监听文件变化

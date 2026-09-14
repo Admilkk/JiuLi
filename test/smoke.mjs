@@ -28,6 +28,20 @@ for (const file of fs.readdirSync('test/fixtures')) {
   fs.copyFileSync(path.join('test/fixtures', file), path.join(FIXTURE_DIR, file))
   fixtureCount++
 }
+/** 模拟"插件内部自己判断主人、非主人静默 return false"的第三方插件写法 */
+fs.writeFileSync(
+  path.join(FIXTURE_DIR, 'silent-deny.js'),
+  `export class silentDeny extends plugin {
+  constructor() {
+    super({ name: '静默拒绝测试', dsc: 'test', event: 'message', rule: [{ reg: '^#静默拒绝$', fnc: 'deny' }] })
+  }
+  async deny() {
+    if (!this.e.isMaster) return false
+    return this.reply('主人你好')
+  }
+}
+`,
+)
 
 /** 测试配置（config/config 为运行时目录，已 gitignore） */
 fs.mkdirSync('test/.tmp-config', { recursive: true })
@@ -180,7 +194,7 @@ check('JiuLi 原生类插件', json().includes('原生类形态'))
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#玖璃性能' })
 await sleep(300)
-check('权限校验（非主人被拒绝）', json().includes('暂无权限'))
+check('权限校验（非主人被拒绝）', json().includes('只有主人才可以使用'))
 
 /* ---------- 10. 定时任务注册 ---------- */
 check('定时任务注册', loader.task.length >= 2, `${loader.task.length} 个任务`)
@@ -230,6 +244,22 @@ clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染状态' })
 await sleep(600)
 check('渲染：后端状态（#渲染状态）', json().includes('渲染后端'))
+
+/* ---------- 12b. 权限与"无响应"提示 ---------- */
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#诊断' })
+await sleep(400)
+check('权限拒绝文案', json().includes('只有主人才可以使用'), json().slice(0, 60))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#静默拒绝' })
+await sleep(400)
+check('插件静默 return false 时的无响应提示', json().includes('主人专属指令'), json().slice(0, 80))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#静默拒绝' })
+await sleep(400)
+check('主人使用时不误报提示', json().includes('主人你好') && !json().includes('主人专属指令'))
 
 /* ---------- 13. #诊断 ---------- */
 clear()
