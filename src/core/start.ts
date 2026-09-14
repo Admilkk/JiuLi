@@ -45,9 +45,10 @@ export async function start() {
     realVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version
   } catch {}
   const compat = cfg.getCompat()
-  process.title = compat.spoof_yunzai
-    ? `JiuLi v${realVersion} (compat TRSS-Yunzai v${compat.version || ''})`
-    : `JiuLi v${realVersion}`
+  const frameworkName = cfg.frameworkName
+  process.title = `JiuLi v${realVersion}`
+  if (frameworkName && frameworkName !== 'jiuli' && frameworkName !== 'JiuLi')
+    process.title += ` (对外标识 ${frameworkName})`
 
   for (const i of ['SIGHUP', 'SIGTERM'] as const)
     process.on(i, (_signal: string, code: number) => process.exit(code))
@@ -62,7 +63,7 @@ export async function start() {
 
   logger.mark('──────── JiuLi ────────')
   logger.mark(logger.yellow(`JiuLi v${realVersion} 启动中…`))
-  if (compat.spoof_yunzai) logger.info(logger.cyan(`兼容模式 · 对外标识 TRSS-Yunzai v${compat.version || ''}`))
+  logger.info(logger.cyan(`插件可见的框架标识：${frameworkName} v${cfg.frameworkVersion}（config/jiuli.yaml → compat）`))
 
   /** 捕获未处理的错误（id 用短名，避免被日志对齐截断成 [unhandle.]） */
   const fatalEvents: Array<[string, string]> = [

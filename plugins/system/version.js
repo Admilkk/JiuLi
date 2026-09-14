@@ -72,7 +72,7 @@ export default class Version extends JiuLiPlugin {
     const commit = await this.gitCommit()
     const msg = [
       `JiuLi v${Version.realVersion()}`,
-      cfg.package.name === 'trss-yunzai' ? `兼容模式：TRSS-Yunzai v${cfg.package.version}（config/jiuli.yaml → compat）` : '兼容模式：关闭',
+      `插件可见的框架标识：${cfg.frameworkName} v${cfg.frameworkVersion}（config/jiuli.yaml → compat）`,
       `Node：${process.version}  ${process.platform} ${process.arch}`,
       commit ? `提交：${commit}` : '',
       `许可：AGPL-3.0（基于 TRSS-Yunzai 重构）`,

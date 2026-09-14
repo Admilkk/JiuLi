@@ -136,7 +136,7 @@ class Cfg {
     return this.uin
   }
 
-  /** package.json（compat.spoof_yunzai 时伪装框架名） */
+  /** package.json（对外暴露 compat.framework_name / framework_version） */
   get package(): Record<string, any> {
     if (this._package) return this._package
     let pkg: Record<string, any> = {}
@@ -145,11 +145,29 @@ class Cfg {
     } catch (err) {
       safeLog(`[Config] 读取 package.json 失败：${err}`)
     }
-    const compat = this.getCompat()
-    if (compat.spoof_yunzai) {
-      pkg = { ...pkg, real_name: pkg.name, name: compat.name || 'trss-yunzai', version: compat.version || pkg.version }
-    }
+    const name = this.frameworkName
+    const version = this.frameworkVersion
+    /** 对外名与真实包名不一致时，保留真实值并对外暴露框架标识 */
+    if (name && name !== pkg.name)
+      pkg = { ...pkg, real_name: pkg.name, real_version: pkg.version, name, version }
     return (this._package = pkg)
+  }
+
+  /**
+   * 对外暴露的框架名（插件用它识别/显示框架，如 yenai、genshin、xiaofei 的状态与关于页）
+   * 配置：config/jiuli.yaml → compat.framework_name（默认 JiuLi；填 trss-yunzai 可让
+   * 旧插件走 TRSS 专属分支，但显示也会变成 TRSS-Yunzai）
+   */
+  get frameworkName(): string {
+    const compat = this.getCompat()
+    const name = compat.framework_name ?? compat.frameworkName
+    return name ? String(name) : 'JiuLi'
+  }
+
+  /** 对外暴露的版本号（插件用它做功能门禁；沿用 3.1.3 可避免老插件判定"版本过低"） */
+  get frameworkVersion(): string {
+    const compat = this.getCompat()
+    return String(compat.framework_version ?? compat.frameworkVersion ?? compat.version ?? '3.1.3')
   }
 
   /** 兼容层配置 */

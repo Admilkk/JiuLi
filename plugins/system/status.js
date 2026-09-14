@@ -41,7 +41,8 @@ export default class Status extends JiuLiPlugin {
         }),
       )
 
-    const compat = cfg.package.name === 'trss-yunzai' ? ` (兼容 TRSS-Yunzai v${cfg.package.version})` : ''
+    const frameworkName = cfg.frameworkName
+    const compat = frameworkName && frameworkName !== 'JiuLi' ? ` (对外标识 ${frameworkName} v${cfg.frameworkVersion})` : ''
     const msg =
       `—— JiuLi v${getRealVersion()}${compat} ——\n` +
       `运行时间：${Bot.getTimeDiff()}\n` +

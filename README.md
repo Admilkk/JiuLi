@@ -1,6 +1,8 @@
 # JiuLi（玖璃）
 
 > 兼容 TRSS-Yunzai 生态的新一代机器人框架 · 内核 TypeScript · 三层架构
+>
+> 当前版本：0.1.0
 
 JiuLi 是一个从 [TRSS-Yunzai](https://gitee.com/TimeRainStarSky/Yunzai) 重构而来的机器人框架。
 目标是：**高性能、类型完备，同时零改动兼容全部云崽（Yunzai）生态插件**。
@@ -200,8 +202,17 @@ jiuli/
   `Bot.em('connect.<id>', ...)`、`Bot.wsf[path]`、`Bot.express`
 - 热重载：平铺插件文件的新增/修改/删除（有 `index.js` 的目录不监听，与云崽一致）
 
-**框架探测**：部分生态插件通过 `package.json` 名称/版本判断框架（如 miao-plugin、genshin、steam-plugin）。
-`config/jiuli.yaml → compat.spoof_yunzai` 默认开启，会对外暴露 `name: trss-yunzai` 与兼容版本号；如需关闭请自行评估。
+**框架探测与对外标识**：生态插件通过框架名判断分支/显示（如 yenai、genshin、xiaofei 的状态页，miao 的 `isMiao`）。
+JiuLi 通过 `config/jiuli.yaml → compat.framework_name` 暴露自己的标识：
+
+| 插件 | 读取方式 | 显示 |
+|---|---|---|
+| `yenai-plugin` / `genshin` / `xiaofei-plugin` | `cfg.package.name` | **Jiuli**（它们对未知名字做了首字母大写，原文为 `JiuLi`） |
+| 直接打印 `cfg.package.name` 的插件 | 同上 | **JiuLi** |
+| `miao-plugin` | 直接读真实 `package.json`（`jiuli`） | `Yunzai-Bot`（miao 硬编码的默认名，需要它自己加分支） |
+
+想让它退回 TRSS 分支（例如某个插件在非 TRSS 分支下行为异常），把 `framework_name` 改成 `trss-yunzai` 即可，
+显示名也会随之变成 TRSS-Yunzai——插件只有一个名字来源，无法既显示 JiuLi 又走 TRSS 分支。
 
 **实机验证记录**：
 
