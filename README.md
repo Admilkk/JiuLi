@@ -45,7 +45,9 @@ pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启
 | `pnpm test` | 冒烟测试（27 项：旧插件 / 内置插件 / 渲染 / 诊断） |
 | `pnpm test:hot` | 热重载测试（新增 / 修改 / 删除 js、新建目录） |
 | `pnpm test:restart` | 守护进程与重启契约测试 |
-| `pnpm jiuli create <名称>` | 生成插件骨架（`--dsl` 用函数式形态） |
+| `pnpm jiuli create <名称>` | 生成插件骨架（`--dsl` 用函数式形态，`--dir` 建独立目录） |
+| `pnpm jiuli add <git地址>` | 安装第三方插件（克隆到 `plugins/` 并自动装依赖） |
+| `pnpm jiuli list` | 列出 `plugins/` 下的插件目录 |
 | `pnpm jiuli status` | 环境与运行状态 |
 
 启动模式：

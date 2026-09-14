@@ -237,13 +237,54 @@ function cmdCreate(args) {
   console.log('  文档：docs/plugin-guide.md')
 }
 
+/** 安装第三方插件：克隆到 plugins/ 下并安装依赖 */
+function cmdAdd(args) {
+  const url = args.find(a => !a.startsWith('-'))
+  if (!url) fail('用法：pnpm jiuli add <git地址> [--name 目录名]')
+  const nameIndex = args.indexOf('--name')
+  const name =
+    args.find(a => a.startsWith('--name='))?.slice('--name='.length) ||
+    (nameIndex > -1 ? args[nameIndex + 1] : null) ||
+    url
+      .split('/')
+      .pop()
+      .replace(/\.git$/, '')
+
+  const target = path.join(CWD, 'plugins', name)
+  if (fs.existsSync(target)) fail(`plugins/${name} 已存在，如需更新请进入该目录 git pull`)
+
+  info(`克隆插件 → plugins/${name}`)
+  const clone = spawnCmd('git', ['clone', '--depth', '1', url, target], { stdio: 'inherit', cwd: CWD })
+  if (clone.status !== 0) fail('克隆失败，请检查仓库地址与网络')
+
+  if (!ensureDeps({ auto: false }) && !fs.existsSync(path.join(CWD, 'node_modules'))) fail('请先执行 pnpm install')
+  info('安装依赖（pnpm install）…')
+  const inst = run('pnpm', ['install'])
+  if (inst.status !== 0) {
+    warn('依赖安装失败，请手动在项目根目录执行 pnpm install')
+  } else ok('依赖安装完成')
+
+  console.log('  下一步：运行中的实例会在 2 秒内自动加载（或发 #重载 / 重启实例）')
+}
+
+function cmdList() {
+  const dir = path.join(CWD, 'plugins')
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const files = fs.readdirSync(path.join(dir, entry.name)).filter(f => f.endsWith('.js'))
+    const hasIndex = files.includes('index.js')
+    console.log(`  ${entry.name.padEnd(28, ' ')} ${hasIndex ? 'index.js' : `${files.length} 个 js`}`)
+  }
+}
+
 function cmdHelp() {
   console.log(`JiuLi CLI
 
   node jiuli.mjs init          安装依赖 + 编译内核 + 生成配置
   node jiuli.mjs create <名称> [--dsl] [--dir]
                                生成插件骨架（默认 plugins/example/<名称>.js，热重载）
-                               --dsl 用函数式形态；--dir 生成独立插件目录
+  node jiuli.mjs add <git地址>  安装第三方插件（克隆到 plugins/ 并装依赖）
+  node jiuli.mjs list          列出 plugins/ 下的插件目录
   node jiuli.mjs start         pm2 后台启动（--fg 前台运行）
   node jiuli.mjs stop          停止
   node jiuli.mjs rs            重启
@@ -260,6 +301,10 @@ const commands = {
   init: cmdInit,
   create: () => cmdCreate(args),
   new: () => cmdCreate(args),
+  add: () => cmdAdd(args),
+  install: () => cmdAdd(args),
+  list: cmdList,
+  ls: cmdList,
   start: () => cmdStart(args),
   run: () => cmdStart(args),
   stop: cmdStop,

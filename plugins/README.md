@@ -11,7 +11,13 @@
 | `system/` | 框架 | 内置基础功能：`status.js`(#状态) `help.js`(#帮助) `master.js`(#设置主人) `add.js`(#添加 词条) `diagnose.js`(#诊断) `reload.js`(#重载) `restart.js`(#重启) `update.js`(#更新) `sendLog.js`(#日志) `version.js`(#版本) 等 | 不要整删 |
 | `adapter/` | 框架 | 适配器：`stdin.js`（终端交互）、`mock.js`（调试用，日志打印发出的消息） | 不要删 |
 | `demo/` | 框架 | 示例插件：`demo-class.js`（类形态） `demo-dsl.js`（DSL 形态） `render-demo.js`（渲染自检：`#渲染测试` `#渲染列表` `#渲染图片` `#渲染长图`），模板在 `demo/resources/` | 可删（删了就没有示例参考） |
-| `<第三方插件>/` | 别人 | 从网上 clone / 下载的插件，例如 `Yunzai-QQBot-Plugin`、`miao-plugin`。**不入 git**，依赖由 `pnpm install` 自动装 | 随意 |
+| `<第三方插件>/` | 别人 | 从网上 clone / 下载的插件，例如 `Yunzai-QQBot-Plugin`、`miao-plugin`、`TRSS-Plugin`。**不入 git**，依赖由 `pnpm install` 自动装 | 随意 |
+
+> ⚠️ 第三方插件必须放在 **`plugins/` 里面**：
+> - 放在项目根目录 → 框架扫描不到（只扫 `plugins/*/`），pnpm 也不会装它的依赖
+> - 推荐直接用命令安装：`pnpm jiuli add <git地址>`（克隆到 `plugins/` 并自动装依赖）
+> - 手动安装：`cd plugins && git clone <地址> && cd .. && pnpm install`
+> - 装好后运行中的实例会在 2 秒内自动加载；也可发 `#重载` 触发
 
 > 内置、示例、适配器都随框架更新；自己的代码只放 `example/`，升级时不会被覆盖，也不会和框架文件混在一起。
 

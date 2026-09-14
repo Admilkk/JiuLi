@@ -928,7 +928,12 @@ class PluginsLoader {
   watchPlugins() {
     if (this.watcher['#root']) return
     const root = `./${this.dir}`
-    const watcher = chokidar.watch(root, { depth: 3, ignoreInitial: true })
+    /** 忽略 node_modules/.git 等目录：clone 第三方插件时避免扫描上万文件与重载风暴 */
+    const watcher = chokidar.watch(root, {
+      depth: 4,
+      ignoreInitial: true,
+      ignored: [/[\\/]node_modules[\\/]/, /[\\/]\.git[\\/]/, /[\\/]\.git$/, /[\\/]temp[\\/]/],
+    })
     const Bot = (globalThis as any).Bot
 
     const relOf = (file: string) => path.relative(path.resolve(root), path.resolve(file)).replace(/\\/g, '/')
