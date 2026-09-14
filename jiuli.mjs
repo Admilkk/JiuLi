@@ -189,39 +189,51 @@ function cmdStatus() {
 function cmdCreate(args) {
   const name = args.find(a => !a.startsWith('-'))
   const dsl = args.includes('--dsl')
-  if (!name) fail('用法：pnpm jiuli create <插件名> [--dsl]')
-  if (!/^[a-zA-Z0-9._-]+$/.test(name)) fail('插件名只能包含字母、数字、点、下划线、连字符')
-
-  const target = path.join(CWD, 'plugins', name)
-  if (fs.existsSync(target)) fail(`plugins/${name} 已存在`)
+  const asDir = args.includes('--dir')
+  if (!name) fail('用法：pnpm jiuli create <插件名> [--dsl] [--dir]')
+  if (!/^[\p{L}\p{N}._-]+$/u.test(name)) fail('插件名只能包含字母、数字、汉字、点、下划线、连字符')
 
   const tplDir = path.join(CWD, 'templates', dsl ? 'plugin-dsl' : 'plugin-class')
   if (!fs.existsSync(tplDir)) fail(`缺少模板目录 ${tplDir}`)
 
-  const className = name
-    .split(/[^a-zA-Z0-9]+/)
-    .filter(Boolean)
-    .map(s => s[0].toUpperCase() + s.slice(1))
-    .join('') || 'MyPlugin'
+  const className = /^[a-zA-Z0-9._-]+$/.test(name)
+    ? name
+        .split(/[^a-zA-Z0-9]+/)
+        .filter(Boolean)
+        .map(s => s[0].toUpperCase() + s.slice(1))
+        .join('') || 'MyPlugin'
+    : name.replace(/[^\p{L}\p{N}_$]/gu, '') || 'MyPlugin'
+  const render = text => text.replaceAll('{{name}}', name).replaceAll('{{ClassName}}', className)
 
+  /** 默认：生成到 plugins/example/<名字>.js（你自己的插件目录，改动即时热重载） */
+  if (!asDir) {
+    const target = path.join(CWD, 'plugins', 'example', `${name}.js`)
+    if (fs.existsSync(target)) fail(`plugins/example/${name}.js 已存在`)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, render(fs.readFileSync(path.join(tplDir, 'index.js'), 'utf8')))
+    ok(`已创建 plugins/example/${name}.js（${dsl ? 'DSL' : '类'}形态 · 保存后 2 秒内自动生效）`)
+    console.log('  文档：docs/plugin-guide.md · docs 里的目录说明：plugins/README.md')
+    return
+  }
+
+  /** --dir：生成独立插件目录（适合带 apps/、resources/、package.json 的插件） */
+  const target = path.join(CWD, 'plugins', name)
+  if (fs.existsSync(target)) fail(`plugins/${name} 已存在`)
   const copyDir = (from, to) => {
     fs.mkdirSync(to, { recursive: true })
     for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
       const src = path.join(from, entry.name)
       const dest = path.join(to, entry.name)
       if (entry.isDirectory()) copyDir(src, dest)
-      else
-        fs.writeFileSync(
-          dest,
-          fs.readFileSync(src, 'utf8').replaceAll('{{name}}', name).replaceAll('{{ClassName}}', className),
-        )
+      else fs.writeFileSync(dest, render(fs.readFileSync(src, 'utf8')))
     }
   }
   copyDir(tplDir, target)
+  fs.mkdirSync(path.join(target, 'resources'), { recursive: true })
 
-  ok(`已创建 plugins/${name}（${dsl ? 'DSL' : '类'}形态）`)
-  console.log(`  编辑：plugins/${name}/index.js`)
-  console.log('  生效：重启（pnpm rs）；若改成平铺 js 文件则由内核热重载')
+  ok(`已创建 plugins/${name}/index.js（独立目录形态）`)
+  console.log(`  编辑：plugins/${name}/index.js · 模板放 plugins/${name}/resources/`)
+  console.log('  生效：改动 js 后等 2 秒自动重载（或 #重载）')
   console.log('  文档：docs/plugin-guide.md')
 }
 
@@ -229,8 +241,9 @@ function cmdHelp() {
   console.log(`JiuLi CLI
 
   node jiuli.mjs init          安装依赖 + 编译内核 + 生成配置
-  node jiuli.mjs create <名称> [--dsl]
-                               生成插件骨架到 plugins/<名称>/
+  node jiuli.mjs create <名称> [--dsl] [--dir]
+                               生成插件骨架（默认 plugins/example/<名称>.js，热重载）
+                               --dsl 用函数式形态；--dir 生成独立插件目录
   node jiuli.mjs start         pm2 后台启动（--fg 前台运行）
   node jiuli.mjs stop          停止
   node jiuli.mjs rs            重启

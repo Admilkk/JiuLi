@@ -238,7 +238,7 @@ const imgs = await puppeteer.screenshots('插件目录名/long/index', {
 for (const img of imgs) await e.reply(img)
 ```
 
-现成的完整示例见 `plugins/example-render/`（卡片 / 表格循环 / 本地图片 / 长图分页）与 `plugins/example-class/`。
+现成的完整示例见 `plugins/demo/render-demo.js`（卡片 / 表格循环 / 本地图片 / 长图分页）与 `plugins/demo/demo-class.js`。
 
 旧写法（兼容）：
 
@@ -360,13 +360,13 @@ Bot.adapter.push({
 `contact` 需提供 `sendMsg(msg)`、`recallMsg(id)`、`makeForwardMsg(msg)`、`getInfo()` 等。
 `Bot.em` 会逐级 emit（`message.group.normal` → `message.group` → `message`），并自动补全事件字段。
 
-调试用适配器见 `plugins/dev-adapter-mock/`。
+调试用适配器见 `plugins/adapter/mock.js/`。
 
 ---
 
 ## 九、调试与测试
 
-- `node .` 直接启动；`plugins/dev-adapter-mock` 会打印机器人发出的消息
+- `node .` 直接启动；`plugins/adapter/mock.js` 会打印机器人发出的消息
 - `JIULI_MOCK_STDIN=1 node .` 后，stdin 每行一个 JSON 事件即可模拟收发
 - 日志等级：`config/config/bot.yaml → log_level: debug`
 - 性能指标：`#玖璃性能`（示例插件提供）或 `import { metrics } from 'jiuli'; metrics.summary()`

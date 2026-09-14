@@ -70,14 +70,15 @@ pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启
 
 框架自带开箱可用的基础功能（与云崽一致，均为 JiuLi 原生写法）：
 
-| 位置 | 指令 |
-|---|---|
-| `plugins/system` | `#帮助` `#插件列表` `#状态`（消息统计查询） `#诊断`（排查没响应） `#版本` `#设置主人` `#撤回` `#添加/#删除/#消息列表`（词条） `#Bot上线/#Bot下线` |
-| `plugins/other` | `#重启` `#关机` `#开机` `#停止` `#日志[条数][关键词]` `#错误日志` `#更新` `#强制更新` `#全部更新` `#更新日志` |
-| `plugins/adapter` | `stdin`（标准输入） |
-| `plugins/dev-adapter-mock` | 无协议端调试适配器 |
-| `plugins/example-class` / `example-dsl` | 原生类 / DSL 插件示例 |
-| `plugins/example-render` | 渲染自检：`#渲染测试` `#渲染列表` `#渲染图片` `#渲染长图` `#渲染状态` |
+| 目录 | 是谁的 | 内容 |
+|---|---|---|
+| `plugins/example/` | **你的** | 自己写的插件（一个 `.js` 一个功能），新增/修改/删除**即时热重载**；`pnpm jiuli create` 默认生成到这里 |
+| `plugins/system/` | 框架 | `#帮助` `#插件列表` `#状态` `#诊断` `#版本` `#设置主人` `#撤回` `#添加/#删除/#消息列表`（词条） `#重载` `#重启` `#关机` `#停止` `#日志` `#更新` `#Bot上线/#Bot下线` |
+| `plugins/adapter/` | 框架 | `stdin.js`（终端交互）、`mock.js`（无协议端调试） |
+| `plugins/demo/` | 框架 | 示例：`demo-class.js`（类形态） `demo-dsl.js`（DSL） `render-demo.js`（`#渲染测试` `#渲染列表` `#渲染图片` `#渲染长图`） |
+| `plugins/其他目录/` | 第三方 | clone 来的插件（如 `Yunzai-QQBot-Plugin`），不入 git，依赖由 `pnpm install` 自动装 |
+
+目录地图、加载规则、写法速查：见 **[plugins/README.md](plugins/README.md)**。
 
 ### 日志
 
@@ -135,10 +136,10 @@ jiuli/
 │   └─ util.js            工具集合
 ├─ renderers/puppeteer/   渲染后端实现（可自行扩展 renderers/<name>/）
 ├─ plugins/               插件目录（详见 plugins/README.md）
-│   ├─ adapter/  system/  other/                   内置插件（随仓库）
-│   ├─ example-class/  example-dsl/                示例插件（随仓库）
-│   ├─ dev-adapter-mock/                           调试适配器（随仓库）
-│   └─ <第三方插件>/                                不入库（.gitignore），依赖由 pnpm workspace 安装
+│   ├─ example/           你自己的插件（平铺 js，即时热重载）
+│   ├─ system/  adapter/  框架内置插件与适配器（随仓库）
+│   ├─ demo/              示例插件与渲染模板（随仓库）
+│   └─ <第三方插件>/       不入库（.gitignore），依赖由 pnpm workspace 安装
 ├─ config/
 │   ├─ default_config/    默认配置（随仓库提供）
 │   ├─ config/            用户配置（首次启动自动生成，不入库）
@@ -212,7 +213,7 @@ jiuli/
 
 ## JiuLi 原生插件
 
-`plugins/example-dsl` 与 `plugins/example-class` 是两个可直接参考的示例。
+`plugins/demo/` 下有可直接参考的示例。
 
 函数式 DSL：
 
@@ -291,7 +292,7 @@ node jiuli.mjs status   # 环境与运行状态
 - [x] 冒烟测试 21 项：旧插件 rule/accept/上下文 + 原生双形态 + 内置插件 + 词条 + 计数 + 渲染
 - [x] 适配器实机验证：stdin（终端交互）、Yunzai-QQBot-Plugin（QQ 官方机器人）
 - [x] 日志重写：消息收发内容（收 ◀ / 发 ▶）、命中插件与正则、浏览器启动细节、启动摘要
-- [x] `#诊断` 指令（适配器 / 在线账号 / 插件 / 渲染 / 最近收发）+ 渲染自检插件 `example-render`
+- [x] `#诊断` 指令（适配器 / 在线账号 / 插件 / 渲染 / 最近收发）+ 渲染自检插件（`plugins/demo/render-demo.js`）
 - [ ] Phase 2：`plugins/adapter/*`（OneBotv11 / Milky / Satori …）实机验证与补齐
 - [ ] Phase 3：原生插件脚手架、类型包细化、`Bot.express` 路由助手、WebUI 配置页
 - [ ] Phase 4：指标面板、热重载补全（含 index.js 目录与 resources）

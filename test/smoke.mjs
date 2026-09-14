@@ -200,7 +200,7 @@ const imgCount = () => sent.filter(i => JSON.stringify(i.msg).includes('"type":"
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#例子渲染' })
 await sleep(20000)
-check('渲染：原生 this.render（example-class）', json().includes('"type":"image"'), json().includes('渲染失败') ? '渲染后端不可用' : '')
+check('渲染：原生 this.render（demo-class）', json().includes('"type":"image"'), json().includes('渲染失败') ? '渲染后端不可用' : '')
 
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染测试' })

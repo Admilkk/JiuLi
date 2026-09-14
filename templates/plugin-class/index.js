@@ -55,7 +55,7 @@ export default class {{ClassName}} extends JiuLiPlugin {
     // await e.reply([segment.at(e.user_id), '\n并 at 你'])
     // await e.reply('5 秒后撤回', true, { recallMsg: 5 })
     // await e.group.sendMsg('主动发群消息')
-    // const img = await this.render('demo/index', { title: '标题' })   // 模板在 resources/demo/index.html
+    // const img = await this.render('示例/index', { title: '标题' })  // 模板放 resources/示例/index.html（平铺插件即 plugins/example/resources/）
     // await e.reply(img || '渲染失败')
 
     return true // 返回 false 表示继续匹配后面的规则
