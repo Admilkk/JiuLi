@@ -36,3 +36,4 @@ plugins/_test-fixtures/
 .idea/
 .vscode/
 *.log
+test/.commit-msg
