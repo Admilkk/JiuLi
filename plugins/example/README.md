@@ -24,7 +24,11 @@ pnpm install
 # 3. 重启实例（#重启）让它生效
 ```
 
-已经装好的：`axios`、`form-data`（`qqbot图床.js` 上传图片用）。
+已经装好的：`jiuli`（框架包，`import { JiuLiPlugin } from 'jiuli'` 靠它）、`axios`、`form-data`（`qqbot图床.js` 上传图片用）。
+
+> 注意：**任何自带 `package.json` 的插件目录都必须声明 `"jiuli": "link:../.."`**，
+> 否则目录里 `import ... from 'jiuli'` 会解析失败（Node 会就近找 package.json，找不到框架包）。
+> 本目录已经声明好，`pnpm jiuli create --dir` 生成的目录也会自动带上。
 
 > 依赖装在 `plugins/example/node_modules/`，不会污染框架依赖；
 > 注意：动态 `import()` 的解析结果会被缓存，**新装依赖后需要 `#重启` 一次**。

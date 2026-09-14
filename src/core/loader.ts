@@ -195,8 +195,16 @@ class PluginsLoader {
         }
     } catch (error: any) {
       success = false
-      if (packageErr && String(error?.stack).includes('Cannot find package')) {
+      const stack = String(error?.stack || '')
+      if (packageErr && stack.includes('Cannot find package')) {
         packageErr.push({ error, file })
+        /** 目录里有自己的 package.json 时会断掉 'jiuli' 的解析，给出明确修法 */
+        if (stack.includes("Cannot find package 'jiuli'"))
+          util.makeLog(
+            'error',
+            `提示：${file.name} 所在目录有自己的 package.json，请在其中加入 "jiuli": "link:../.."，然后执行 pnpm install`,
+            'Plugin',
+          )
       } else {
         util.makeLog('error', [`插件加载错误 ${logger.red(file.name)}`, error], 'Plugin')
       }

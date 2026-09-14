@@ -230,9 +230,26 @@ function cmdCreate(args) {
   }
   copyDir(tplDir, target)
   fs.mkdirSync(path.join(target, 'resources'), { recursive: true })
+  /** 带自己的 package.json 的插件需要显式声明框架依赖，否则 import 'jiuli' 解析不到 */
+  fs.writeFileSync(
+    path.join(target, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: name,
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+        description: '插件依赖清单：需要什么库就加到 dependencies，然后 pnpm install',
+        dependencies: { jiuli: 'link:../..' },
+      },
+      null,
+      2,
+    )}\n`,
+  )
 
   ok(`已创建 plugins/${name}/index.js（独立目录形态）`)
   console.log(`  编辑：plugins/${name}/index.js · 模板放 plugins/${name}/resources/`)
+  console.log(`  依赖：plugins/${name}/package.json（已声明 jiuli，需要别的库加进去后 pnpm install）`)
   console.log('  生效：改动 js 后等 2 秒自动重载（或 #重载）')
   console.log('  文档：docs/plugin-guide.md')
 }

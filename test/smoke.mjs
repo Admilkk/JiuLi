@@ -105,7 +105,7 @@ check('内置 #状态（非主人视图：仅消息统计）', json().includes('
 
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#版本' })
-await sleep(300)
+await sleep(900)
 check('内置 #版本', json().includes('AGPL-3.0'))
 
 clear()

@@ -24,14 +24,26 @@ export default class Version extends JiuLiPlugin {
     }
   }
 
+  /** git 提交信息缓存（避免每次 #版本 都起一个 git 子进程） */
+  static commitCache = { value: '', at: 0 }
+
+  async gitCommit() {
+    const now = Date.now()
+    if (Version.commitCache.value && now - Version.commitCache.at < 300000) return Version.commitCache.value
+    const ret = await Bot.exec('git log -1 --pretty=format:"%h %s"', { quiet: true })
+    const value = ret.error ? '' : ret.stdout
+    Version.commitCache = { value, at: now }
+    return value
+  }
+
   async version() {
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-    const commit = (await Bot.exec('git log -1 --pretty=format:"%h %s"', { quiet: true }))?.stdout
+    const commit = await this.gitCommit()
     const msg = [
       `JiuLi v${Version.realVersion()}`,
       cfg.package.name === 'trss-yunzai' ? `兼容模式：TRSS-Yunzai v${cfg.package.version}（config/jiuli.yaml → compat）` : '兼容模式：关闭',
       `Node：${process.version}  ${process.platform} ${process.arch}`,
-      `提交：${commit || '未知'}`,
+      commit ? `提交：${commit}` : '',
       `许可：AGPL-3.0（基于 TRSS-Yunzai 重构）`,
       pkg.dependencies?.puppeteer ? `渲染：puppeteer ${pkg.dependencies.puppeteer}` : '',
     ]
