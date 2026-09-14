@@ -27,11 +27,12 @@ switch (process.env.app_type || process.argv[2]) {
     global.start_type = 'internal'
 }
 
-if (global.start_type === 'internal') {
-  /** 内部模式：守护进程负责拉起主进程（同一终端、支持 #重启） */
+if (global.start_type === 'internal' && process.env.JIULI_CHILD !== '1') {
+  /** 内部模式：守护进程负责拉起主进程（同一终端、支持 #重启 不开新窗口） */
   const { supervise } = await import('./lib/core/start.js')
   await supervise()
 } else {
+  /** JIULI_CHILD=1 时是守护进程拉起的子进程，直接运行主程序 */
   const { start } = await import('./lib/core/start.js')
   await start()
 }
