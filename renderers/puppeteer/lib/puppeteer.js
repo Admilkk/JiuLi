@@ -67,7 +67,8 @@ export default class Puppeteer extends Renderer {
     let execPath = this.config.executablePath
     if (!execPath)
       try {
-        execPath = puppeteer.executablePath()
+        /** puppeteer 新版本为异步接口，兼容同步/异步两种实现 */
+        execPath = await puppeteer.executablePath()
       } catch {}
     const info = [
       `程序 ${execPath || '默认'}`,

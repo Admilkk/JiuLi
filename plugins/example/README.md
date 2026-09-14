@@ -12,6 +12,23 @@ pnpm jiuli create my-plugin
 
 目录里的 `qqbot图床.js` 是自行加入的第三方文件（已在 `.gitignore` 中排除，不入库）。
 
+## 插件的依赖装这里
+
+`package.json` 是**你自己插件的依赖清单**：需要什么库就往 `dependencies` 里加，然后在项目根目录执行一次安装：
+
+```bash
+# 例如给插件用 axios
+# 1. 编辑 plugins/example/package.json → dependencies 加 "axios": "^1.7.9"
+# 2. 安装
+pnpm install
+# 3. 重启实例（#重启）让它生效
+```
+
+已经装好的：`axios`、`form-data`（`qqbot图床.js` 上传图片用）。
+
+> 依赖装在 `plugins/example/node_modules/`，不会污染框架依赖；
+> 注意：动态 `import()` 的解析结果会被缓存，**新装依赖后需要 `#重启` 一次**。
+
 ## 相关约定
 
 - 一个 `.js` = 一个插件；也可以建子目录（子目录里放 `index.js`，或者直接平铺多个 js）

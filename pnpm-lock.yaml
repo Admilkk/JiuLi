@@ -127,6 +127,15 @@ importers:
         specifier: ^3.6.3
         version: 3.7.1
 
+  plugins/example:
+    dependencies:
+      axios:
+        specifier: ^1.7.9
+        version: 1.16.1
+      form-data:
+        specifier: ^4.0.1
+        version: 4.0.6
+
 packages:
 
   /@borewit/text-codec@0.2.2:

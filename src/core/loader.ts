@@ -613,10 +613,18 @@ class PluginsLoader {
       const byPlugin = e.logPlugin ? ` · 由 ${logger.green.bold(e.logPlugin)}` : ''
       const cost = Date.now() - sendStart
       const failed = Boolean(res?.error)
+      const failReason = failed
+        ? util.truncate(
+            res.error?.[0]?.message ??
+              res.error?.[0]?.code ??
+              (typeof res.error?.[0] === 'string' ? res.error[0] : util.String(res.error?.[0] ?? res.error)),
+            120,
+          )
+        : ''
       util.makeLog(
         failed ? 'error' : 'info',
         `发 ${failed ? '✖' : '▶'} ${target} · ${logger.yellow(content)}${byPlugin} · ${util.colorCost(cost)}${
-          failed ? ` · ${util.truncate(res.error?.[0]?.message ?? res.error)}` : ''
+          failed ? ` · 发送失败：${failReason}` : ''
         }`,
         'Msg',
       )
