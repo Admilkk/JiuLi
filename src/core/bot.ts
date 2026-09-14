@@ -719,27 +719,30 @@ export default class JiuLiBot extends EventEmitter {
 
   async exit(code = 0) {
     await this.redisExit()
-    switch ((globalThis as any).start_type) {
-      case 'pm2':
-        return util.exec('pnpm stop')
-      case 'external':
-        return process.exit(255)
-    }
+    if ((globalThis as any).start_type === 'pm2') return util.exec('pnpm stop')
     process.exit(code)
   }
 
   async restart() {
+    const { default: loader } = await import('./loader.js')
+    const { RESTART_CODE } = await import('./start.js')
+    /** 先把计数写回，避免重启丢统计 */
+    await loader.flushCount().catch(() => {})
     await this.redisExit()
-    if (process.platform !== 'win32') (process as any).execve?.(process.argv[0], process.argv, process.env)
 
-    switch ((globalThis as any).start_type) {
-      case 'pm2':
-        await util.exec('pnpm run restart')
-        break
-      case 'internal':
-        util.cmdStart(process.argv[0], process.argv.slice(1))
-        break
+    util.makeLog('mark', '正在重启…', 'Restart')
+    try {
+      this.server.close()
+    } catch {}
+    try {
+      this.httpsServer?.close()
+    } catch {}
+
+    /** pm2 模式交给 pm2；其余模式以 255 退出，由守护进程/外部管理器在同一终端拉起 */
+    if ((globalThis as any).start_type === 'pm2') {
+      await util.exec('pnpm run restart')
+      process.exit()
     }
-    process.exit()
+    process.exit(RESTART_CODE)
   }
 }

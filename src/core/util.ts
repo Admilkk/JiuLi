@@ -83,23 +83,38 @@ class Util {
   }
 
   /** 事件场景描述（日志用），如 `群 测试群(888777666) · 测试用户(10001) · 主人` */
-  describeScene(e: any): string {
-    const parts: string[] = []
-    if (e.isGroup || e.group_id) parts.push(`群 ${e.group_name || ''}(${e.group_id})`)
-    else if (e.user_id) parts.push(`好友 ${e.sender?.nickname || ''}(${e.user_id})`)
-    else if (e.notice_type || e.request_type) parts.push(`${e.post_type}.${e.notice_type || e.request_type}`)
-
-    const who = e.sender?.card || e.sender?.nickname
-    if (who && (e.isGroup || e.group_id)) parts.push(`${who}(${e.user_id})`)
-    else if (who && !e.user_id) parts.push(`${who}`)
-
+  describeScene(e: any, colored = false): string {
+    const paint = (fn: (s: string) => string, text: any) => (colored ? fn(String(text)) : String(text))
+    const scene: string[] = []
     const tags: string[] = []
+
+    if (e.isGroup || e.group_id) {
+      scene.push(`群 ${paint(logger.cyan, e.group_name || '')}(${paint(logger.cyan, e.group_id)})`)
+      const who = e.sender?.card || e.sender?.nickname
+      if (who) scene.push(`${paint(logger.magenta, who)}(${paint(logger.magenta, e.user_id)})`)
+      else if (e.user_id) scene.push(paint(logger.magenta, e.user_id))
+    } else if (e.user_id) {
+      const who = e.sender?.nickname || e.sender?.card || ''
+      scene.push(`好友 ${paint(logger.magenta, who)}(${paint(logger.magenta, e.user_id)})`)
+    } else if (e.notice_type || e.request_type) {
+      scene.push(paint(logger.cyan, `${e.post_type}.${e.notice_type || e.request_type}`))
+    }
+
     if (e.isMaster) tags.push('主人')
     if (e.atBot) tags.push('@Bot')
     if (e.hasAlias) tags.push('别名')
     if (e.isPrivate) tags.push('私聊')
-    if (tags.length) parts.push(tags.join('/'))
-    return parts.join(' · ') || String(e.self_id ?? '')
+    if (tags.length) scene.push(paint(logger.yellow, tags.join('/')))
+    return scene.join(' · ') || String(e.self_id ?? '')
+  }
+
+  /** 耗时着色：<300ms 绿、<1s 黄、再慢红 */
+  colorCost(ms: number, colored = true) {
+    const text = `${ms}ms`
+    if (!colored) return text
+    if (ms < 300) return logger.green(text)
+    if (ms < 1000) return logger.yellow(text)
+    return logger.red(text)
   }
 
   /** 日志中标记的消息来源（分发时写入，回复时读取） */
@@ -481,6 +496,12 @@ class Util {
     }
     this.makeLog(opts.quiet ? 'debug' : 'mark', [logger.cyan(cmd), logger.green(args.join(' '))], 'CMDStart')
     return spawn(cmd, args, { stdio: 'inherit', detached: true, ...opts })
+  }
+
+  /** 在同一终端内启动进程（重启用，不开新窗口） */
+  cmdInherit(cmd: string, args: string[] = [], opts: any = {}) {
+    this.makeLog('debug', [logger.cyan(cmd), logger.green(args.join(' '))], 'CMDInherit')
+    return spawn(cmd, args, { stdio: 'inherit', detached: false, ...opts })
   }
 
   getTimeDiff(time1: number = (globalThis as any).Bot?.stat?.start_time * 1000, time2 = Date.now()) {

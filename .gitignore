@@ -15,16 +15,14 @@ temp/
 .redis-data/
 
 # ---- 插件与配置策略（与 TRSS-Yunzai 一致）----
-# 仅跟踪内置插件与示例；第三方插件及其 node_modules 不入库
+# 仅跟踪内置插件；第三方插件及其 node_modules 不入库
 /plugins/*
 !/plugins/README.md
 !/plugins/adapter
-!/plugins/system
-!/plugins/other
-!/plugins/dev-adapter-mock
-!/plugins/example-class
-!/plugins/example-dsl
-!/plugins/example-render
+!/plugins/example
+# 自行加入的第三方插件文件（如从云崽插件目录拷来的单个 js）默认不入库；
+# 想让它进仓库，把下面这行删掉即可
+plugins/example/qqbot图床.js
 
 # 插件在 config/ 根目录写配置（可能含账号凭据），不入库
 /config/*

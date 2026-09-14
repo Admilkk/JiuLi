@@ -1,6 +1,12 @@
 /**
  * JiuLi 启动入口
- * 启动模式：stop / daemon / pm2 / start / 默认(internal)
+ *
+ * 启动模式：
+ *   node .            internal（默认）→ 守护进程 + 主进程，同一终端；#重启 不会开新窗口
+ *   node . daemon     与 internal 相同（保留兼容）
+ *   node . start      external：单进程运行，重启交给外部守护（如 systemd/supervisor）
+ *   node . pm2        由 pm2 管理（pnpm start）
+ *   node . stop       请求正在运行的实例退出
  */
 switch (process.env.app_type || process.argv[2]) {
   case 'stop': {
@@ -10,22 +16,10 @@ switch (process.env.app_type || process.argv[2]) {
     }).catch(() => {})
     process.exit()
   }
-  case 'daemon': {
-    console.log('守护进程正在启动主进程')
-    const { spawnSync } = await import('node:child_process')
-    while (
-      spawnSync(process.argv[0], [process.argv[1], 'start', ...process.argv.slice(2)], {
-        stdio: 'inherit',
-      }).status !== 255
-    ) {
-      console.log('守护进程正在重启主进程')
-    }
-    console.log('守护进程已停止')
-    process.exit()
-  }
   case 'pm2':
     global.start_type = 'pm2'
     break
+  case 'external':
   case 'start':
     global.start_type = 'external'
     break
@@ -33,5 +27,11 @@ switch (process.env.app_type || process.argv[2]) {
     global.start_type = 'internal'
 }
 
-const { start } = await import('./lib/core/start.js')
-await start()
+if (global.start_type === 'internal') {
+  /** 内部模式：守护进程负责拉起主进程（同一终端、支持 #重启） */
+  const { supervise } = await import('./lib/core/start.js')
+  await supervise()
+} else {
+  const { start } = await import('./lib/core/start.js')
+  await start()
+}

@@ -99,7 +99,6 @@ class PluginsLoader {
       for (const app of apps) {
         if (!app.isFile() || !app.name.endsWith('.js')) continue
         ret.push({ name: `${tmp.name}/${app.name}`, path: `${tmp.path}/${app.name}` })
-        this.watch(val.name, app.name)
       }
     }
     return ret
@@ -152,6 +151,9 @@ class PluginsLoader {
 
     /** 优先级排序 */
     this.priority.sort((a, b) => a.priority - b.priority)
+
+    /** 热重载（监听整个 plugins/ 目录） */
+    this.watchPlugins()
   }
 
   /** 构建事件索引 */
@@ -299,7 +301,9 @@ class PluginsLoader {
     if (cfg.bot.log_msg !== false && e.msg !== undefined)
       util.makeLog(
         'info',
-        `收 ◀ ${scene} · ${logger.yellow(e.msg ? util.truncate(e.msg, msgLength) : util.describeMsg(e.message))}`,
+        `收 ◀ ${util.describeScene(e, true)} · ${logger.yellow(
+          e.msg ? util.truncate(e.msg, msgLength) : util.describeMsg(e.message),
+        )}`,
         'Msg',
       )
     const recentItem = {
@@ -409,7 +413,9 @@ class PluginsLoader {
         /** 命中日志：插件 / 来源文件 / 正则 / 执行方法 / 优先级 */
         util.makeLog(
           v.log === false ? 'debug' : 'info',
-          `${logger.yellow('中 ▶')} ${logger.green(i.name)} <${i.key}> · 规则 ${logger.gray(regStr)} · 方法 ${fncName} · 优先级 ${i.priority}`,
+          `中 ▶ ${logger.green.bold(i.name)} ${logger.gray(`<${i.key}>`)} · 规则 ${logger.gray(regStr)} · 方法 ${logger.cyan(
+            fncName,
+          )} · 优先级 ${i.priority}`,
           'Plugin',
         )
 
@@ -429,7 +435,7 @@ class PluginsLoader {
             if (res === false) {
               util.makeLog(
                 v.log === false ? 'debug' : 'mark',
-                `${logger.green(i.name)} · 返回 false，继续匹配后续规则 · ${cost}ms`,
+                `${logger.green.bold(i.name)} · 返回 false，继续匹配后续规则 · ${util.colorCost(cost)}`,
                 'Plugin',
               )
               continue
@@ -440,7 +446,7 @@ class PluginsLoader {
                 : ` · 返回 ${typeof res === 'object' ? 'object' : util.truncate(res, 16)}`
             util.makeLog(
               v.log === false ? 'debug' : 'mark',
-              `${logger.green(i.name)} <${i.key}> · 完成 · ${logger.green(`${cost}ms`)}${resText}`,
+              `完成 ${logger.green.bold(i.name)} · ${util.colorCost(cost)}${resText}`,
               'Plugin',
             )
           } catch (err) {
@@ -598,21 +604,25 @@ class PluginsLoader {
       }
 
       /** 发出消息日志：目标 / 内容 / 由哪个插件发出 / 耗时 */
-      const target = e.isGroup || e.group_id ? `群 ${e.group_name || ''}(${e.group_id})` : `好友 ${e.user_id}`
+      const targetPlain =
+        e.isGroup || e.group_id ? `群 ${e.group_name || ''}(${e.group_id})` : `好友 ${e.user_id}`
+      const target = e.isGroup || e.group_id
+        ? `群 ${logger.cyan(e.group_name || '')}(${logger.cyan(e.group_id)})`
+        : `好友 ${logger.magenta(e.user_id)}`
       const content = util.describeMsg(msg)
-      const byPlugin = e.logPlugin ? ` · 由 ${logger.cyan(e.logPlugin)}` : ''
+      const byPlugin = e.logPlugin ? ` · 由 ${logger.green.bold(e.logPlugin)}` : ''
       const cost = Date.now() - sendStart
       const failed = Boolean(res?.error)
       util.makeLog(
         failed ? 'error' : 'info',
-        `发 ${failed ? '✖' : '▶'} ${target} · ${logger.yellow(content)}${byPlugin} · ${cost}ms${
+        `发 ${failed ? '✖' : '▶'} ${target} · ${logger.yellow(content)}${byPlugin} · ${util.colorCost(cost)}${
           failed ? ` · ${util.truncate(res.error?.[0]?.message ?? res.error)}` : ''
         }`,
         'Msg',
       )
       this.pushRecent(this.recent.send, {
         time: Date.now(),
-        scene: target,
+        scene: targetPlain,
         content,
         plugin: e.logPlugin || '',
       })
@@ -849,9 +859,11 @@ class PluginsLoader {
     const oldPluginCount = this.pluginCount
     try {
       await this.unloadPlugin(key)
+      /** 目录型插件（有 index.js）需要指向 index.js，否则 Node 不支持目录 import */
+      const target = key.endsWith('.js') ? key : `${key}/index.js`
       const success = await this.importPlugin({
         name: key,
-        path: `../../${this.dir}/${key}?${moment().format('x')}`,
+        path: `../../${this.dir}/${target}?${moment().format('x')}`,
       })
       if (!success) {
         await this.unloadPlugin(key)
@@ -874,59 +886,93 @@ class PluginsLoader {
     }
   }
 
-  /** 监听热更新 */
-  watch(dirName: string, appName: string) {
-    this.watchDir(dirName)
-    if (this.watcher[`${dirName}.${appName}`]) return
+  /* ==================== 热重载 ==================== */
 
-    const file = `./${this.dir}/${dirName}/${appName}`
-    const watcher = chokidar.watch(file)
-    const key = `${dirName}/${appName}`
+  /** 把 plugins/ 下的相对路径换算成插件 key（与 getPlugins 的命名保持一致） */
+  private keyOf(rel: string): string | null {
+    const parts = rel.split('/')
+    if (parts.length < 2) return null
+    if (parts.length === 2) return parts[1] === 'index.js' ? parts[0] : rel
+    /** 更深的文件（apps/ 等）归属到插件目录 */
+    return parts[0]
+  }
 
-    const changeHandler = util.debounce(() => {
-      util.makeLog('mark', `[修改插件][${dirName}][${appName}]`, 'Plugin')
-      this.changePlugin(key)
-    }, 5000)
-    watcher.on('change', changeHandler)
+  private isLoaded(key: string) {
+    return this.pluginCountMap.has(key) || this.priority.some(i => i.key === key)
+  }
 
-    const unlinkHandler = util.debounce(async () => {
-      util.makeLog('mark', `[卸载插件][${dirName}][${appName}]`, 'Plugin')
-      await this.unloadPlugin(key, true)
-    }, 5000)
-    watcher.on('unlink', unlinkHandler)
+  /** 按 key 加载（新增的插件文件/目录） */
+  private async loadKey(key: string) {
+    const target = key.endsWith('.js') ? key : `${key}/index.js`
+    await this.importPlugin({ name: key, path: `../../${this.dir}/${target}?${Date.now()}` })
+    this.priority.sort((a, b) => a.priority - b.priority)
+    this.buildEventIndex()
+    this.createTask()
+  }
 
-    const watcherAny = watcher as any
-    watcherAny.changeHandler = changeHandler
-    watcherAny.unlinkHandler = unlinkHandler
-    this.watcher[`${dirName}.${appName}`] = watcher  }
-
-  /** 监听文件夹更新 */
-  watchDir(dirName: string) {
-    if (this.watcher[dirName]) return
-    const watcher = chokidar.watch(`./${this.dir}/${dirName}/`)
+  /**
+   * 监听整个 plugins/ 目录（唯一入口，替换原来的逐文件 watcher）
+   * - 新增 js 文件 / 新增目录中的 js → 自动加载
+   * - 修改 js（含 index.js 与 apps/ 等深层文件）→ 自动重载
+   * - 删除 js → 自动卸载
+   * - 模板/资源变化不重载（渲染层自带缓存失效）
+   */
+  watchPlugins() {
+    if (this.watcher['#root']) return
+    const root = `./${this.dir}`
+    const watcher = chokidar.watch(root, { depth: 3, ignoreInitial: true })
     const Bot = (globalThis as any).Bot
 
-    /** chokidar 初次扫描会为已有文件触发 add，ready 之前的一律忽略 */
-    let ready = false
-    watcher.on('ready', () => (ready = true))
+    const relOf = (file: string) => path.relative(path.resolve(root), path.resolve(file)).replace(/\\/g, '/')
+
+    const handle = (action: 'add' | 'change' | 'unlink') =>
+      util.debounce(async (file: string) => {
+        const rel = relOf(file)
+        if (!rel || rel.startsWith('..')) return
+        if (!rel.endsWith('.js')) {
+          if (action === 'change') util.makeLog('debug', `资源变化（无需重载）· ${rel}`, 'Plugin')
+          return
+        }
+        const key = this.keyOf(rel)
+        if (!key) return
+
+        if (action === 'unlink') {
+          if (!this.isLoaded(key)) return
+          util.makeLog('mark', `插件已删除 → 卸载 · ${logger.cyan(rel)}`, 'Plugin')
+          await this.unloadPlugin(key)
+          return
+        }
+
+        const loaded = this.isLoaded(key)
+        util.makeLog(
+          'mark',
+          `插件${action === 'add' ? '新增' : '修改'} → ${loaded ? '重载' : '加载'} · ${logger.cyan(rel)}`,
+          'Plugin',
+        )
+        if (loaded) await this.changePlugin(key)
+        else await this.loadKey(key)
+      }, 2000)
 
     Bot.once('online', () => {
+      watcher.on('add', handle('add'))
+      watcher.on('change', handle('change'))
+      watcher.on('unlink', handle('unlink'))
       watcher.on(
-        'add',
-        util.debounce(async (PluPath: string) => {
-          if (!ready) return
-          const appName = path.basename(PluPath)
-          if (!appName.endsWith('.js')) return
-          util.makeLog('mark', `[新增插件][${dirName}][${appName}]`, 'Plugin')
-          await this.importPlugin({ name: `${dirName}/${appName}`, path: `../../${this.dir}/${dirName}/${appName}?${moment().format('X')}` })
-          this.priority.sort((a, b) => a.priority - b.priority)
-          this.buildEventIndex()
-          this.createTask()
-          this.watch(dirName, appName)
-        }, 5000) as any,
+        'addDir',
+        util.debounce(async (dir: string) => {
+          const rel = relOf(dir)
+          if (!rel || rel.startsWith('..') || rel.includes('/')) return
+          util.makeLog('debug', `检测到新插件目录 · ${rel}（放入 .js 文件后自动加载）`, 'Plugin')
+        }, 2000) as any,
       )
+      util.makeLog('info', '热重载已开启（plugins/ 下新增 / 修改 / 删除 js 即时生效）', 'Plugin')
     })
-    this.watcher[dirName] = watcher
+    this.watcher['#root'] = watcher
+  }
+
+  /** 兼容旧调用 */
+  watch() {
+    this.watchPlugins()
   }
 
   /** 关闭全部 watcher（file_watch=false 时由 config 处理） */

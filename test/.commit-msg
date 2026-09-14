@@ -1,0 +1,28 @@
+refactor(plugins): 目录收敛为 example/ + adapter/，热重载与重启行为重做
+
+插件目录（按你的思路收敛，不再一眼看不懂）
+- plugins/example/ 内置基础功能 + 示例 + 自己写的 js，全部平铺：新增/修改/删除即时热重载
+  基础：status help master add(词条) recallReply diagnose disablePrivate friend invite quit botOperate reload
+  维护：restart update sendLog version
+  示例：demo-class demo-dsl render-demo（resources/ 共用一套模板目录）
+- plugins/adapter/ stdin(终端交互) + mock(调试)
+- 其余目录（第三方插件）不入库，策略不变
+- 用户放在 plugins/example/ 的 qqbot图床.js 保持可加载；按第三方文件策略加入 gitignore（想入库删掉那行）
+
+热重载重写（原来只监听"启动时已存在的平铺 js"，新目录/新文件都不会被发现）
+- 改为监听整个 plugins/：新增 js、修改 js（含 index.js 与 apps/ 深层文件）、删除 js、新建插件目录全部识别
+- 补齐目录型插件重载路径（原来对 index.js 目录会触发非法的目录 import）
+- 新增 #重载 / #重载 <关键词>（手动重载，回复后再动手，避免卸载正在处理的插件）
+- 日志明确：插件新增→加载 / 插件修改→重载 / 插件已删除→卸载 · <文件>
+
+重启（原来 internal 模式用 cmd start，会开新窗口）
+- node . 默认改为「守护进程 + 主进程」，同一终端内运行
+- #重启 = 刷统计 → 关服务 → 以退出码 255 退出 → 守护进程在同一终端重新拉起（不开新窗口）
+- pm2 走 pnpm run restart；external 交给外部管理器；#停止 正常退出且不再拉起
+- 新增 test/supervisor-check.mjs 验证守护重启，test/restart-check.mjs 验证退出契约（255 + 关服务）
+
+日志高亮
+- 插件名加粗绿、来源文件灰、正则灰、执行方法青、用户 id/群号青或品红、消息内容黄、耗时按快慢绿/黄/红
+- 收 ◀ / 发 ▶ 场景着色，标签（主人/@Bot/别名）黄
+
+测试：冒烟 27/27 · 热重载 8/8 · 守护进程通过（新增 pnpm test:hot / test:restart / test:all）

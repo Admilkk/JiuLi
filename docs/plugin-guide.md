@@ -381,7 +381,9 @@ Bot.adapter.push({
 定时任务（`task.fnc`）与 `init()` 中没有事件对象，请不要在其中调用 `this.reply`。
 
 **Q：修改插件没生效？**
-只有平铺 `.js`（无 `index.js` 的目录）支持热重载，与云崽一致；有 `index.js` 时请重启。
+热重载覆盖：新增 js、修改 js（含 `index.js` 与 `apps/` 深层文件）、删除 js、新建插件目录——改完等 2 秒即可。
+若没生效：`config/config/bot.yaml → file_watch` 是否为 `false`（关闭了文件监听）；
+或直接用 `#重载`（全部）／`#重载 状态`（按关键词）手动重载。
 
 **Q：`#状态` 等云崽内置指令没有？**
 云崽的 `plugins/system`、`plugins/other` 是插件而非内核功能，把对应目录复制过来即可。

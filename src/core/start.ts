@@ -38,7 +38,6 @@ export async function initRedisOrFallback() {
 export async function start() {
   const g = globalThis as any
   g.start_type ||= 'internal'
-
   /** 时区与标题 */
   process.env.TZ ??= 'Asia/Shanghai'
   let realVersion = '0.0.0'
@@ -91,4 +90,53 @@ export async function start() {
 
   await bot.run()
   return bot
+}
+
+/** 子进程请求重启时的退出码（守护进程据此重新拉起） */
+export const RESTART_CODE = 255
+
+/**
+ * 守护进程：在同一个终端内拉起/重启主进程（internal 模式默认走这里）
+ *
+ * - 主进程调用 `#重启` 时以退出码 255 退出 → 守护进程立即在同一终端重新拉起（不开新窗口）
+ * - 主进程正常退出（`#停止`）或崩溃 → 守护进程结束，不会无限重启
+ */
+export async function supervise() {
+  const { spawn } = await import('node:child_process')
+  setLogDir('logs')
+  setLog()
+
+  const entry = process.argv[1]
+  const args = process.argv.slice(2).filter(a => a !== 'daemon')
+  let stopping = false
+  process.once('SIGINT', () => (stopping = true))
+  process.once('SIGTERM', () => (stopping = true))
+
+  let restarts = 0
+  while (!stopping) {
+    const child = spawn(process.execPath, [entry, ...args], {
+      stdio: 'inherit',
+      env: { ...process.env, app_type: 'internal', JIULI_CHILD: '1' },
+    })
+    const { code, signal } = await new Promise<{ code: number | null; signal: string | null }>(resolve =>
+      child.on('exit', (c, s) => resolve({ code: c, signal: s })),
+    )
+
+    if (stopping) {
+      logger.mark('[守护] 收到退出信号，停止守护进程', 'Daemon')
+      break
+    }
+    if (code === RESTART_CODE) {
+      restarts++
+      logger.mark(`[守护] 主进程请求重启 · 第 ${restarts} 次重新拉起（同一终端，不开新窗口）`, 'Daemon')
+      await new Promise(r => setTimeout(r, 800))
+      continue
+    }
+    logger.mark(
+      `[守护] 主进程已退出（code=${code ?? signal}），不再重启。如需后台常驻请使用 pnpm start`,
+      'Daemon',
+    )
+    break
+  }
+  process.exit(0)
 }

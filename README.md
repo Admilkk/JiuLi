@@ -42,11 +42,20 @@ pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启
 | `pnpm run setup` | 仅安装依赖 + 编译内核 + 生成配置 |
 | `pnpm app` | 前台直接运行（`node .`） |
 | `pnpm build` / `pnpm watch` / `pnpm typecheck` | 编译 / 增量编译 / 类型检查 |
-| `pnpm test` | 冒烟测试（21 项） |
+| `pnpm test` | 冒烟测试（27 项：旧插件 / 内置插件 / 渲染 / 诊断） |
+| `pnpm test:hot` | 热重载测试（新增 / 修改 / 删除 js、新建目录） |
+| `pnpm test:restart` | 守护进程与重启契约测试 |
 | `pnpm jiuli create <名称>` | 生成插件骨架（`--dsl` 用函数式形态） |
 | `pnpm jiuli status` | 环境与运行状态 |
 
-启动模式：`node .`（internal）/ `node . start`（external）/ `node . pm2` / `node . daemon` / `node . stop`
+启动模式：
+
+| 命令 | 进程模型 | 重启行为 |
+|---|---|---|
+| `node .`（默认，internal） | 守护进程 + 主进程，同一终端 | `#重启` 时主进程以 255 退出，守护进程**在同一终端**重新拉起（不开新窗口） |
+| `pnpm start`（pm2） | pm2 后台管理 | `#重启` 交给 pm2，日志用 `pnpm log` 查看 |
+| `node . start`（external） | 单进程 | 以 255 退出，交给外部管理器（systemd/supervisor）拉起 |
+| `node . stop` | — | 请求运行中的实例退出 |
 
 ### 终端直接输入指令
 
