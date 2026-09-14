@@ -65,37 +65,108 @@ if (legacy) {
   check('旧插件 accept + notice（欢迎新人）', json().includes('欢迎'), json().slice(0, 80))
 } else skip('旧插件 accept + notice（欢迎新人）')
 
-/* ---------- 3. 旧插件：master 权限 + 转发消息 + load_time ---------- */
+/* ---------- 3. 内置 #状态（master + 转发消息 + load_time） ---------- */
 if (legacy) {
   clear()
   emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#状态' })
-  await sleep(500)
-  check('旧插件 #状态（master + makeForwardArray）', json().includes('运行时间'), json().slice(0, 100))
-} else skip('旧插件 #状态（master + makeForwardArray）')
+  await sleep(600)
+  check(
+    '内置 #状态（master + makeForwardArray）',
+    json().includes('JiuLi v') && json().includes('运行时间') && json().includes('插件加载用时'),
+    json().slice(0, 100),
+  )
+} else skip('内置 #状态（master + makeForwardArray）')
 
-/* ---------- 4. 原生 DSL 插件 ---------- */
+/* ---------- 4. JiuLi 内置插件 ---------- */
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#帮助' })
+await sleep(300)
+check('内置 #帮助', json().includes('JiuLi 指令说明'))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#状态' })
+await sleep(400)
+check('内置 #状态（非主人视图：仅消息统计）', json().includes('消息统计'))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#版本' })
+await sleep(300)
+check('内置 #版本', json().includes('AGPL-3.0'))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#设置主人' })
+await sleep(300)
+check('内置 #设置主人（非主人获取验证码）', json().includes('请输入验证码'))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '000000' })
+await sleep(300)
+check('内置 #设置主人（错误验证码 + 上下文结束）', json().includes('验证码错误'))
+
+/* ---------- 4b. 旧插件上下文会话（主动复读.js） ---------- */
+if (legacy) {
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#复读' })
+  await sleep(300)
+  const asked = json().includes('请发送要复读的内容')
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '复读这段内容' })
+  await sleep(300)
+  check('旧插件 setContext / finish（主动复读）', asked && json().includes('复读这段内容'), json().slice(0, 80))
+} else skip('旧插件 setContext / finish（主动复读）')
+
+/* ---------- 5. 词条（上下文会话 + 关键词触发） ---------- */
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#添加 冒烟词条' })
+await sleep(300)
+check('内置 #添加（进入上下文）', json().includes('请发送添加内容'))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '这是词条内容' })
+await sleep(200)
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#结束添加' })
+await sleep(300)
+check('内置词条添加完成', json().includes('添加成功：冒烟词条'))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '冒烟词条' })
+await sleep(300)
+check('词条关键词触发', json().includes('这是词条内容'))
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#删除 冒烟词条' })
+await sleep(300)
+check('内置 #删除', json().includes('删除成功：冒烟词条'))
+
+/* ---------- 6. #撤回（master） ---------- */
+globalThis.__jiuli_mock_recall.length = 0
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#撤回' })
+await sleep(300)
+check('内置 #撤回', globalThis.__jiuli_mock_recall.length > 0, `${globalThis.__jiuli_mock_recall.length} 条撤回`)
+
+/* ---------- 7. 原生 DSL 插件 ---------- */
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#玖璃你好' })
 await sleep(300)
 check('JiuLi 原生 DSL 插件（正则捕获）', json().includes('原生 DSL'))
 check('DSL 正则捕获组', json().includes('玖璃'))
 
-/* ---------- 5. 原生类插件 ---------- */
+/* ---------- 8. 原生类插件 ---------- */
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#例子你好' })
 await sleep(300)
 check('JiuLi 原生类插件', json().includes('原生类形态'))
 
-/* ---------- 6. 权限校验（非主人） ---------- */
+/* ---------- 9. 权限校验（非主人） ---------- */
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#玖璃性能' })
 await sleep(300)
 check('权限校验（非主人被拒绝）', json().includes('暂无权限'))
 
-/* ---------- 7. 定时任务注册 ---------- */
+/* ---------- 10. 定时任务注册 ---------- */
 check('定时任务注册', loader.task.length >= 2, `${loader.task.length} 个任务`)
 
-/* ---------- 8. 计数批量写回 Redis ---------- */
+/* ---------- 11. 计数批量写回 Redis ---------- */
 await sleep(1400)
 const redis = globalThis.redis
 const GID = '999888777'
@@ -108,7 +179,7 @@ try {
 } catch {}
 check('消息计数批量写回 Redis', countKeys.length > 0, countKeys.slice(0, 2).join(', '))
 
-/* ---------- 9. 渲染管线（puppeteer + 本机 Edge，失败可容忍） ---------- */
+/* ---------- 12. 渲染管线（puppeteer + 本机 Edge，失败可容忍） ---------- */
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#例子渲染' })
 await sleep(15000)

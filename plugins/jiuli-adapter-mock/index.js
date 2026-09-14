@@ -16,6 +16,9 @@
 /** 已发送消息记录 */
 const SENT = []
 globalThis.__jiuli_mock_sent = SENT
+/** 撤回记录 */
+const RECALL = []
+globalThis.__jiuli_mock_recall = RECALL
 
 const UIN = 'mock'
 
@@ -27,7 +30,9 @@ function makeContact(type, id) {
       logger.mark(`[Mock发送][${type}:${id}]`, Bot.String(msg).slice(0, 300))
       return { message_id: `mock-${Date.now()}-${SENT.length}`, ...record }
     },
-    recallMsg() {
+    recallMsg(message_id) {
+      RECALL.push({ type, id, message_id, at: Date.now() })
+      logger.mark(`[Mock撤回][${type}:${id}] ${message_id}`)
       return true
     },
     getMsg() {
@@ -221,5 +226,5 @@ const adapter = {
 Bot.adapter.push(adapter)
 
 /** 作为插件导出，便于被内核识别（非插件类，会被忽略） */
-export { adapter, SENT }
+export { adapter, SENT, RECALL }
 export default adapter

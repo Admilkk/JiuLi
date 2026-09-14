@@ -8,6 +8,10 @@ JiuLi 支持三种插件形态，共用同一套内核与分发机制：
 | JiuLi 类形态 | `import { JiuLiPlugin } from 'jiuli'` | 需要类型提示与渲染/数据目录辅助 |
 | JiuLi DSL | `definePlugin({ apps: [command(...), task(...)] })` | 偏爱函数式、无 `this` 的写法 |
 
+> 框架自带的开箱功能都在 `plugins/system`（状态/帮助/设置主人/词条/撤回…）、
+> `plugins/other`（重启/关机/更新/日志/版本）与 `plugins/adapter/stdin`（终端交互），
+> 可直接作为原生写法的参考实现。
+
 ---
 
 ## 一、目录结构

@@ -66,12 +66,18 @@ class Cfg {
     const dir = 'config/config/'
     const defDir = 'config/default_config/'
     try {
-      const filesDef = fs.readdirSync(defDir)
+      const filesDef = fs.readdirSync(defDir).filter(f => f !== 'pm2.yaml')
       if (fs.existsSync(dir)) {
         const files = fs.readdirSync(dir)
         for (const i of filesDef)
           if (!files.includes(i)) fs.copyFileSync(`${defDir}${i}`, `${dir}${i}`)
       } else fs.cpSync(defDir, dir, { recursive: true })
+      /** pm2 配置放在 config/ 下（供 pnpm start 使用） */
+      const pm2File = 'config/pm2.yaml'
+      if (!fs.existsSync(pm2File) && fs.existsSync(`${defDir}pm2.yaml`))
+        fs.copyFileSync(`${defDir}pm2.yaml`, pm2File)
+      /** pm2.yaml 若被误复制进 config/config/ 则清理 */
+      if (fs.existsSync(`${dir}pm2.yaml`)) fs.rmSync(`${dir}pm2.yaml`, { force: true })
     } catch (err) {
       safeLog(`[Config] 初始化配置目录失败：${err}`)
     }

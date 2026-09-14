@@ -28,25 +28,52 @@ JiuLi 是一个从 [TRSS-Yunzai](https://gitee.com/TimeRainStarSky/Yunzai) 重�
 ## 快速开始
 
 ```bash
-pnpm install          # 安装依赖（跳过 Chromium 下载，使用本机 Chrome/Edge）
-pnpm build            # 编译 TypeScript 内核（src → lib/core）
-node .                # 启动
+pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启动（一条命令）
 ```
 
-- 启动模式：`node .`（internal）/ `node . start`（external）/ `node . pm2` / `node . daemon` / `node . stop`
-- 无协议端调试：内置 `plugins/jiuli-adapter-mock`（日志中打印机器人发出的消息）；
-  也可设 `JIULI_MOCK_STDIN=1`，之后每行输入一个 JSON 事件：
-  ```json
-  {"type":"message","group_id":"123456","user_id":"10001","msg":"#帮助"}
-  ```
-- 冒烟测试：`node test/smoke.mjs`
-  （如需完整跑通旧插件用例，可把 TRSS-Yunzai 的部分插件复制到 `plugins/_legacy/`）
+常用命令（CLI 与 npm scripts 等价）：
+
+| 命令 | 说明 |
+|---|---|
+| `pnpm start` | pm2 后台启动（自动检查依赖/构建/配置；`pnpm start --fg` 前台） |
+| `pnpm stop` | 停止 |
+| `pnpm rs` | 重启（重启完成后会通知到原会话） |
+| `pnpm log [条数]` | 查看日志（`pnpm log -f` 持续输出） |
+| `pnpm run setup` | 仅安装依赖 + 编译内核 + 生成配置 |
+| `pnpm app` | 前台直接运行（`node .`） |
+| `pnpm build` / `pnpm watch` / `pnpm typecheck` | 编译 / 增量编译 / 类型检查 |
+| `pnpm test` | 冒烟测试（21 项） |
+| `pnpm jiuli status` | 环境与运行状态 |
+
+启动模式：`node .`（internal）/ `node . start`（external）/ `node . pm2` / `node . daemon` / `node . stop`
+
+### 终端直接输入指令
+
+内置标准输入适配器：`node .` 启动后（TTY 环境）终端会出现 `> ` 提示符，
+直接输入 `#帮助`、`#状态`、`#版本` 等指令即可，机器人回复会打印回终端。
+默认配置的主人账号就是 `stdin:stdin`（`config/config/other.yaml → master`）。
+
+无协议端调试也内置了 Mock 适配器（日志打印机器人发出的消息）；设置 `JIULI_MOCK_STDIN=1`
+后可用 JSON 事件驱动：`{"type":"message","group_id":"123456","user_id":"10001","msg":"#帮助"}`
+
+### 内置插件
+
+框架自带开箱可用的基础功能（与云崽一致，均为 JiuLi 原生写法）：
+
+| 位置 | 指令 |
+|---|---|
+| `plugins/system` | `#帮助` `#插件列表` `#状态`（消息统计查询） `#版本` `#设置主人` `#撤回` `#添加/#删除/#消息列表`（词条） `#Bot上线/#Bot下线` |
+| `plugins/other` | `#重启` `#关机` `#开机` `#停止` `#日志[条数][关键词]` `#错误日志` `#更新` `#强制更新` `#全部更新` `#更新日志` |
+| `plugins/adapter` | `stdin`（标准输入） |
+| `plugins/jiuli-adapter-mock` | 无协议端调试适配器（不入库以外的插件） |
+| `plugins/jiuli-example-*` | 原生类 / DSL 插件示例 |
 
 ## 目录结构
 
 ```
 jiuli/
 ├─ app.js                 启动入口（启动模式切换）
+├─ jiuli.mjs              CLI：init / start / stop / rs / log / build / test / status
 ├─ src/                   ★ 内核 TypeScript 源码（构建产物到 lib/core）
 │   ├─ index.ts           原生插件 API（JiuLiPlugin / definePlugin / command / task / accept ...）
 │   └─ core/              内核：bot / loader / plugin / config / redis / render / events / metrics ...
@@ -62,11 +89,15 @@ jiuli/
 │   ├─ modules/           oicq / md5 / node-fetch 兼容包（pnpm link:）
 │   └─ util.js            工具集合
 ├─ renderers/puppeteer/   渲染后端实现（可自行扩展 renderers/<name>/）
-├─ plugins/               插件目录（旧插件直接放入即可；内置示例与 Mock 适配器）
+├─ plugins/               插件目录
+│   ├─ adapter/  system/  other/     内置插件（随仓库）
+│   ├─ jiuli-example-*  jiuli-adapter-mock  示例与调试适配器（随仓库）
+│   └─ <第三方插件>/                  不入库（.gitignore），依赖由 pnpm workspace 安装
 ├─ config/
 │   ├─ default_config/    默认配置（随仓库提供）
-│   └─ config/            用户配置（首次启动自动生成，勿提交）
-├─ test/smoke.mjs         冒烟测试
+│   ├─ config/            用户配置（首次启动自动生成，不入库）
+│   └─ <插件>.yaml        插件配置（可能含凭据，不入库）
+├─ test/smoke.mjs         冒烟测试（21 项）
 └─ docs/                  架构说明、插件开发指南、重构调研报告
 ```
 
@@ -119,6 +150,12 @@ jiuli/
 
 **框架探测**：部分生态插件通过 `package.json` 名称/版本判断框架（如 miao-plugin、genshin、steam-plugin）。
 `config/jiuli.yaml → compat.spoof_yunzai` 默认开启，会对外暴露 `name: trss-yunzai` 与兼容版本号；如需关闭请自行评估。
+
+**实机验证记录**：
+
+- `Yunzai-QQBot-Plugin`（QQ 官方机器人适配器，依赖 qq-official-bot / fastify / silk-wasm 等）：
+  放入 `plugins/` 后依赖由 pnpm workspace 自动安装，适配器加载成功并完成鉴权连接
+  （日志：`[AUTH] 访问令牌已设置` → `[WebSocketReceiver] 欢迎 XXX` → `QQBot(QQBot) ... 已连接`）。
 
 **已知限制**：
 
@@ -188,22 +225,29 @@ perf:
 ## 开发
 
 ```bash
-pnpm build        # 编译 TS 内核
+pnpm build        # 编译 TS 内核（src → lib/core）
 pnpm watch        # 增量编译
 pnpm typecheck    # 仅类型检查
-node test/smoke.mjs
+pnpm test         # 冒烟测试
+node jiuli.mjs status   # 环境与运行状态
 ```
 
-修改兼容层（`lib/**` 手写 JS）后无需编译；修改内核（`src/**`）后需 `pnpm build`。
+修改兼容层（`lib/**` 手写 JS）后无需编译；修改内核或内置插件（`src/**`、`plugins/**` 的原生插件）后需 `pnpm build`。
+
+> 版本管理策略与云崽一致：只跟踪 `plugins/{adapter,system,other}` 与示例插件，
+> 第三方插件与其 `node_modules`、`config/*.yaml`（可能含账号凭据）都不入库。
 
 ## 路线图
 
 - [x] Phase 1：内核 + 兼容层 P0（Bot / logger / redis / segment / plugin / cfg / loader / e 对象 / 渲染双通道）
-- [x] 冒烟测试：旧插件 rule/accept/权限/转发消息 + 原生双形态 + 计数 + 渲染
-- [ ] Phase 2：`plugins/adapter/*`（OneBotv11 / Milky / Satori …）与 `plugins/system/*` 实机验证与补齐
-- [ ] Phase 3：原生插件脚手架、类型包细化、`Bot.express` 路由助手
-- [ ] Phase 4：指标面板、热重载补全（含 index.js 目录与 resources）、WebUI
-- [ ] Phase 5：生态插件逐个实机验证，建立「已知不兼容列表」
+- [x] 内置插件：`system`（状态/帮助/设置主人/词条/撤回…）、`other`（重启/关机/更新/日志/版本）、`adapter/stdin`
+- [x] 一键启动与进程管理：`jiuli` CLI + pm2（`pnpm start / stop / rs / log`）
+- [x] 冒烟测试 21 项：旧插件 rule/accept/上下文 + 原生双形态 + 内置插件 + 词条 + 计数 + 渲染
+- [x] 适配器实机验证：stdin（终端交互）、Yunzai-QQBot-Plugin（QQ 官方机器人）
+- [ ] Phase 2：`plugins/adapter/*`（OneBotv11 / Milky / Satori …）实机验证与补齐
+- [ ] Phase 3：原生插件脚手架、类型包细化、`Bot.express` 路由助手、WebUI 配置页
+- [ ] Phase 4：指标面板、热重载补全（含 index.js 目录与 resources）
+- [ ] Phase 5：生态插件逐个实机验证（miao-plugin / genshin / Guoba …），建立「已知不兼容列表」
 
 ## 许可
 

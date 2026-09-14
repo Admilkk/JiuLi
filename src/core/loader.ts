@@ -38,7 +38,16 @@ function isEmptyObject(obj: any) {
 }
 
 class PluginsLoader {
-  priority: PluginEntry[] = []
+  /** 分发列表（赋值时会重建事件索引，兼容插件直接替换 priority 的用法） */
+  private _priority: PluginEntry[] = []
+  get priority(): PluginEntry[] {
+    return this._priority
+  }
+  set priority(list: PluginEntry[]) {
+    this._priority = list
+    this.buildEventIndex()
+  }
+
   handler: Record<string, any> = {}
   task: any[] = []
   dir = 'plugins'

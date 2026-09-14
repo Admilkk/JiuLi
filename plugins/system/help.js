@@ -1,0 +1,62 @@
+import { JiuLiPlugin } from 'jiuli'
+import { PluginsLoader } from 'jiuli/core'
+
+/**
+ * #帮助 / #插件列表
+ * 内置指令说明 + 已加载插件与指令一览（转发消息）
+ */
+export default class Help extends JiuLiPlugin {
+  constructor() {
+    super({
+      name: '帮助',
+      dsc: '#帮助',
+      event: 'message',
+      priority: -Infinity,
+      rule: [
+        { reg: '^#帮助$', fnc: 'help' },
+        { reg: '^#(插件列表|功能列表|指令列表)$', fnc: 'pluginList' },
+      ],
+    })
+  }
+
+  async help() {
+    const text = [
+      'JiuLi 指令说明',
+      '【#帮助】本说明',
+      '【#插件列表】查看已加载插件与指令',
+      '【#状态】运行状态与消息统计',
+      '【#设置主人】设置主人账号',
+      '【#日志】查看最近运行日志（#错误日志 / #日志500）',
+      '【#重启】【#关机】【#停止】进程管理',
+      '【#更新】拉取框架更新',
+      '【#撤回】撤回触发消息与机器人回复',
+      '【#添加】【#删除】【#消息列表】词条管理',
+    ].join('\n')
+    const tip = [
+      '使用提示',
+      '· 终端直接输入指令即可（标准输入适配器），或连接协议端后正常聊天触发',
+      '· 群聊默认需要 at 机器人或使用前缀（config/config/group.yaml → botAlias / onlyReplyAt）',
+      '· 插件与适配器放在 plugins/ 目录，支持热重载（平铺 js 文件）',
+    ].join('\n')
+    return this.reply(Bot.makeForwardArray([text, tip]))
+  }
+
+  async pluginList() {
+    const lines = []
+    for (const i of PluginsLoader.priority) {
+      const rules = (i.plugin.rule || []).map(r => `  ${r.reg}`).filter(Boolean)
+      lines.push(`${i.name}（${i.key}）${rules.length ? `\n${rules.join('\n')}` : '  [事件监听]'}`)
+    }
+    const chunks = []
+    let current = '已加载插件与指令'
+    for (const line of lines) {
+      if (current.length + line.length > 1200) {
+        chunks.push(current)
+        current = ''
+      }
+      current += `\n${line}`
+    }
+    if (current) chunks.push(current)
+    return this.reply(Bot.makeForwardArray(chunks))
+  }
+}
