@@ -64,13 +64,17 @@ export async function start() {
   logger.mark(logger.yellow(`JiuLi v${realVersion} 启动中…`))
   if (compat.spoof_yunzai) logger.info(logger.cyan(`兼容模式 · 对外标识 TRSS-Yunzai v${compat.version || ''}`))
 
-  /** 捕获未处理的错误 */
-  for (const i of ['uncaughtException', 'unhandledRejection'] as const)
-    process.on(i, (e: any) => {
+  /** 捕获未处理的错误（id 用短名，避免被日志对齐截断成 [unhandle.]） */
+  const fatalEvents: Array<[string, string]> = [
+    ['uncaughtException', 'Crash'],
+    ['unhandledRejection', 'Reject'],
+  ]
+  for (const [event, id] of fatalEvents)
+    process.on(event, (e: any) => {
       try {
-        bot.makeLog('error', e, i)
+        bot.makeLog('error', e, id)
       } catch (err) {
-        console.error(i, e, err)
+        console.error(event, e, err)
         process.exit()
       }
     })

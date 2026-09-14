@@ -37,6 +37,8 @@ export default class Master extends JiuLiPlugin {
       if (values.items.some(item => item.value == value)) return
       values.add(value)
     } else doc.set(key, [value])
+    /** 目录被清理时自愈 */
+    await Bot.mkdir(yamlFile.replace(/[/\\][^/\\]+$/, ''))
     return fs.writeFile(yamlFile, doc.toString(), 'utf8')
   }
 

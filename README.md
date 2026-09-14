@@ -281,6 +281,10 @@ node jiuli.mjs status   # 环境与运行状态
 
 修改兼容层（`lib/**` 手写 JS）后无需编译；修改内核或内置插件（`src/**`、`plugins/**` 的原生插件）后需 `pnpm build`。
 
+> **维护提示**：升级或调试时**不要删除 `data/`、`logs/`、`config/config/`**——它们是运行状态（数据、日志、主人与群配置）。
+> 框架已对"目录被清理"做了自愈（写文件前先确保目录存在），但正在运行的实例仍可能短暂报错。
+> 需要重置配置时，删掉对应单个 `config/config/*.yaml` 让它重新生成即可。
+
 > 版本管理策略与云崽一致：只跟踪 `plugins/{adapter,system,other}` 与示例插件，
 > 第三方插件与其 `node_modules`、`config/*.yaml`（可能含账号凭据）都不入库。
 

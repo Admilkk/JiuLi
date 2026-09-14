@@ -88,9 +88,26 @@ Bot.adapter.push(
       }
     }
 
+    /** 确保数据目录存在（运行期间被清理掉也能自愈） */
+    async ensureDir() {
+      if (this.dirReady) return
+      await Bot.mkdir(this.path)
+      this.dirReady = true
+    }
+
+    /** 记录输入历史（失败只记 debug，不影响正常使用） */
+    appendHistory(msg) {
+      this.ensureDir()
+        .then(() => fs.appendFile(`${this.path}history`, `${Date.now().toString(36)}:${msg}\n`, 'utf8'))
+        .catch(err => {
+          this.dirReady = false
+          Bot.makeLog('debug', ['写入 stdin 历史失败', err.message], this.id)
+        })
+    }
+
     /** 把一行输入包装成私聊消息事件 */
     message(msg) {
-      fs.appendFile(`${this.path}history`, `${Date.now().toString(36)}:${msg}\n`, 'utf8')
+      this.appendHistory(msg)
       const data = {
         bot: Bot[this.id],
         self_id: this.id,
@@ -109,6 +126,7 @@ Bot.adapter.push(
       if (!(process.stdin.isTTY || process.env.FORCE_TTY || force)) return
 
       await Bot.mkdir(this.path)
+      this.dirReady = true
       const tty = Boolean(process.stdin.isTTY)
       const sdk = readline
         .createInterface({

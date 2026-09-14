@@ -427,6 +427,7 @@ class Util {
 
     if (typeof opts.size === 'number' && data.length > opts.size) {
       const file = path.join('temp', ulid())
+      await this.mkdir('temp')
       await fs.writeFile(file, data)
       setTimeout(this.rm.bind(this, file, {}), 60000)
       data = `file://${path.resolve(file)}`

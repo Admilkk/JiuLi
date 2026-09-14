@@ -158,6 +158,8 @@ export default class Add extends JiuLiPlugin {
   async saveJson() {
     const obj = {}
     for (const [k, v] of messageMap[this.group_id]) obj[k] = v
+    /** 运行期间数据目录被清理时自愈 */
+    await Bot.mkdir(this.path)
     await fs.writeFile(`${this.path}${this.group_id}.json`, JSON.stringify(obj, '', '\t'))
   }
 
