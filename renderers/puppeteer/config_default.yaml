@@ -1,0 +1,36 @@
+# 如需自定义，复制此文件为 config.yaml 进行配置
+# 更新配置后需要重启
+
+# chromium 地址，可填写系统的 edge/chromium 路径，例如（根据实际情况调整）：
+# chromiumPath: C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+chromiumPath:
+
+# puppeteer websocket 地址。连接单独存在的 chromium。
+# puppeteerWS: 'ws://browserless:3000'
+puppeteerWS:
+
+# headless
+headless: "new"
+
+# puppeteer启动args，注意args的--前缀
+args:
+  - --disable-gpu
+  - --disable-setuid-sandbox
+  - --no-sandbox
+  - --no-zygote
+
+# puppeteer截图超时时间
+puppeteerTimeout:
+
+# 页面goto时的参数
+pageGotoParams:
+  timeout: 120000
+
+# 截图数达到时自动重启浏览器 避免生成速度越来越慢
+restartNum: 100
+
+# 空闲多少分钟后自动关闭浏览器，下次截图时自动启动（0 为不自动关闭）
+idleTime: 30
+
+# 用户数据目录
+userDataDir:

@@ -1,0 +1,9 @@
+packages:
+  - 'plugins/**'
+
+strictDepBuilds: false
+onlyBuiltDependencies:
+  - classic-level
+  - puppeteer
+  - sqlite3
+  - sharp
