@@ -136,6 +136,39 @@ emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '000000' }
 await sleep(300)
 check('内置 #设置主人（错误验证码 + 上下文结束）', json().includes('验证码错误'))
 
+/* ---------- 4a2. 设置主人：正确验证码 → 写入配置（端到端） ---------- */
+{
+  /** 验证码只打在日志里，临时截获 console.log 取出 */
+  await sleep(1200) // 等过 1 秒消息去重窗口（与上面的 #设置主人 文本相同）
+  const logs = []
+  const origLog = console.log
+  console.log = (...args) => {
+    logs.push(args.map(String).join(' '))
+    origLog(...args)
+  }
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '99998', msg: '#设置主人' })
+  await sleep(500)
+  console.log = origLog
+
+  /** 日志里带 ANSI 颜色码，先剥掉再取验证码 */
+  const cleanLogs = logs.join(String.fromCharCode(10)).replace(/\u001b\[[0-9;]*m/g, '')
+  const matched = cleanLogs.match(/设置主人验证码\s+([0-9A-Z]+)/)
+  check('设置主人：验证码已打印到日志', Boolean(matched), matched ? `验证码 ${matched[1]}` : '未捕获到验证码')
+
+  if (matched) {
+    clear()
+    emit({ type: 'message', group_id: '888777666', user_id: '99998', msg: matched[1] })
+    await sleep(700)
+    const cfgText = fs.readFileSync('test/.tmp-config/other.yaml', 'utf8')
+    check(
+      '设置主人：正确验证码 → 完成并写入配置',
+      json().includes('设置主人完成') && cfgText.includes('99998'),
+      json().slice(0, 60),
+    )
+  }
+}
+
 /* ---------- 4b. 旧插件上下文会话（主动复读.js） ---------- */
 if (legacy) {
   clear()
