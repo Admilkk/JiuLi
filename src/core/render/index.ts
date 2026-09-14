@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url'
 import yaml from 'yaml'
 import { logger } from '../log.js'
 import cfg from '../config/index.js'
+import util from '../util.js'
 
 /** 惰性获取 segment（由兼容层注入全局） */
 async function getSegment() {
@@ -61,9 +62,15 @@ export class RendererLoader {
           continue
         }
         this.renderers.set(renderer.id, renderer)
-        logger.info(`加载渲染后端 ${renderer.id}`)
+        util.makeLog(
+          'info',
+          `渲染后端 ${logger.green(renderer.id)} 已就绪 · 类型 ${renderer.type} · 支持 script ${renderer.support_script ? '是' : '否'}${
+            typeof renderer.info === 'string' ? ` · ${renderer.info}` : ''
+          }`,
+          'Render',
+        )
       } catch (err) {
-        logger.error(`渲染后端 ${name} 加载失败`, err as any)
+        util.makeLog('error', `渲染后端 ${name} 加载失败 · ${(err as any)?.message || err}`, 'Render')
       }
     }
 
@@ -93,7 +100,7 @@ export class RendererLoader {
         const res = await i.render(name, data)
         if (res) return res
       } catch (err) {
-        logger.error(`渲染后端 ${i.id} 渲染错误`, err as any)
+        util.makeLog('error', `渲染后端 ${i.id} 渲染出错 · ${(err as any)?.message || err}`, 'Render')
       }
     return false
   }

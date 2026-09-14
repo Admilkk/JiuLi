@@ -208,8 +208,11 @@ await Bot.sendGroupMsg(bot_id, group_id, '指定机器人发送')
 类形态（`JiuLiPlugin`）：
 
 ```js
-const img = await this.render('help/index', { title: '标题' })   // 返回 base64:// 或 false
-await this.reply(img || '渲染失败')
+const img = await this.render('help/index', { title: '标题' })   // 返回可直接 e.reply 的图片（消息段/Buffer），失败为 false
+await e.reply(img || '渲染失败')
+
+const b64 = await this.renderBase64('help/index', data)          // 需要 base64:// 字符串时（自行拼消息段）
+await e.reply([segment.image(b64)])
 ```
 
 DSL / 通用：
@@ -218,9 +221,24 @@ DSL / 通用：
 // 自动发送（返回 true / msgId）
 await e.runtime.render('插件目录名', 'help/index', { title: '标题' })
 
-// 只要 base64
+// 只要 base64:// 字符串
 const base64 = await e.runtime.render('插件目录名', 'help/index', data, { retType: 'base64' })
 ```
+
+长图分页（超过 `multiPageHeight` 自动切片，返回多张图片段）：
+
+```js
+import puppeteer from '../../lib/puppeteer/puppeteer.js'
+const imgs = await puppeteer.screenshots('插件目录名/long/index', {
+  tplFile: './plugins/插件目录名/resources/long/index.html',
+  saveId: 'index',
+  pluResPath: '../../../plugins/插件目录名/resources/',
+  ...data,
+})
+for (const img of imgs) await e.reply(img)
+```
+
+现成的完整示例见 `plugins/example-render/`（卡片 / 表格循环 / 本地图片 / 长图分页）与 `plugins/example-class/`。
 
 旧写法（兼容）：
 

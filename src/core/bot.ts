@@ -326,6 +326,9 @@ export default class JiuLiBot extends EventEmitter {
     /** 加载渲染后端（浏览器仍在首次截图时懒启动） */
     const { default: renderService } = await import('./render/index.js')
     await renderService.load()
+    /** 预热框架模块：让"插件加载耗时"只反映插件自身成本，而不是第一个 import 的冷启动 */
+    await import('./index.js')
+    await import('../index.js')
     await PluginsLoader.load()
     await loadEvents()
 
@@ -335,6 +338,14 @@ export default class JiuLiBot extends EventEmitter {
       'info',
       `连接地址：${logger.blue(`${this.url.replace(/^http/, 'ws')}/`)}${logger.cyan(`[${Object.keys(this.wsf)}]`)}`,
       'WebSocket',
+    )
+    const adapterNames = this.adapter.map((a: any) => `${a.name}(${a.id})`).join(' · ')
+    util.makeLog(
+      'mark',
+      `JiuLi 就绪 · 用时 ${util.getTimeDiff(this.stat.start_time * 1000)} · 适配器 ${this.adapter.length} 个${
+        adapterNames ? `（${adapterNames}）` : ''
+      } · 在线账号 ${[...this.uin].length} 个`,
+      'Online',
     )
     this.emit('online', this)
   }

@@ -113,12 +113,13 @@ class PluginsLoader {
     }
     if (this.priority.length) return
 
-    util.makeLog('info', '-----------', 'Plugin')
-    util.makeLog('info', '加载插件中...', 'Plugin')
+    util.makeLog('info', '扫描插件目录 plugins/ …', 'Plugin')
 
     const files = await this.getPlugins()
     this.pluginCount = 0
+    this.load_time = {}
     const packageErr: any[] = []
+    const loadStart = Date.now()
 
     await Promise.allSettled(
       files.map(async file => {
@@ -131,8 +132,23 @@ class PluginsLoader {
     this.createTask()
     this.buildEventIndex()
 
-    util.makeLog('info', `加载定时任务[${this.task.length}个]`, 'Plugin')
-    util.makeLog('info', `加载插件[${this.pluginCount}个]`, 'Plugin')
+    /** 汇总：插件数 / 规则数 / 监听数 / 任务数 / 耗时 */
+    const rules = this.priority.reduce((n, i) => n + (i.plugin.rule?.length || 0), 0)
+    const listeners = this.priority.filter(i => i.plugin.accept || i.plugin.event !== 'message').length
+    util.makeLog(
+      'info',
+      `插件 ${logger.green(String(this.pluginCount))} 个 · 规则 ${rules} 条 · 事件监听 ${listeners} 个 · 定时任务 ${this.task.length} 个 · 用时 ${util.getTimeDiff(loadStart)}`,
+      'Plugin',
+    )
+    /** 加载较慢的插件：debug 级列出（首轮 import 会包含冷启动开销，仅作参考） */
+    const sorted = Object.entries(this.load_time).sort((a, b) => b[1] - a[1])
+    const slow = sorted.filter(([, t]) => t > 200).slice(0, 5)
+    if (slow.length)
+      util.makeLog('debug', `加载耗时前列：${slow.map(([f, t]) => `${f} ${t}ms`).join(' · ')}`, 'Plugin')
+    /** 真正异常的插件（>3s）单独告警 */
+    const abnormal = sorted.filter(([, t]) => t > 3000)
+    if (abnormal.length)
+      util.makeLog('mark', `加载异常缓慢（>3s）：${abnormal.map(([f, t]) => `${f} ${logger.yellow(`${t}ms`)}`).join(' · ')}`, 'Plugin')
 
     /** 优先级排序 */
     this.priority.sort((a, b) => a.priority - b.priority)
@@ -251,6 +267,16 @@ class PluginsLoader {
 
   /* ==================== 分发 ==================== */
 
+  /** 最近的消息记录（供 #诊断 排查"为什么没回复"） */
+  recent = {
+    receive: [] as Array<{ time: number; scene: string; content: string; matched: string }>,
+    send: [] as Array<{ time: number; scene: string; content: string; plugin: string }>,
+  }
+  private pushRecent(list: any[], item: any) {
+    list.push(item)
+    if (list.length > 5) list.shift()
+  }
+
   async deal(e: JiuLiEvent) {
     this.pushCount(e, 'receive', e.message)
     /** 检查黑白名单 */
@@ -266,6 +292,23 @@ class PluginsLoader {
     this.reply(e)
     /** 注册 runtime（轻量挂载，重活懒加载） */
     if (cfg.getCompat().runtime !== false) Runtime.attach(e)
+
+    /** 收到消息（谁、在哪、说了什么） */
+    const scene = util.describeScene(e)
+    const msgLength = Number(cfg.bot.log_msg_length ?? 60)
+    if (cfg.bot.log_msg !== false && e.msg !== undefined)
+      util.makeLog(
+        'info',
+        `收 ◀ ${scene} · ${logger.yellow(e.msg ? util.truncate(e.msg, msgLength) : util.describeMsg(e.message))}`,
+        'Msg',
+      )
+    const recentItem = {
+      time: Date.now(),
+      scene,
+      content: e.msg ? util.truncate(e.msg, msgLength) : util.describeMsg(e.message),
+      matched: '',
+    }
+    this.pushRecent(this.recent.receive, recentItem)
 
     /** 候选插件 */
     const priority: PluginEntry[] = []
@@ -301,7 +344,10 @@ class PluginsLoader {
       }
       if (!isEmptyObject(context)) {
         let ret
-        for (const fnc in context) ret ||= await getInstance(i)[fnc](context[fnc])
+        for (const fnc in context) {
+          util.makeLog('debug', `上下文命中 ${i.name} <${i.key}> · ${fnc}`, 'Plugin')
+          ret ||= await getInstance(i)[fnc](context[fnc])
+        }
         if (ret === 'continue') continue
         return
       }
@@ -334,50 +380,77 @@ class PluginsLoader {
     for (const i of priority)
       if (i.plugin.accept) {
         const res = await getInstance(i).accept(e)
-        if (res === 'return') return
-        if (res) break
+        if (res === 'return') {
+          util.makeLog('info', `${i.name} <${i.key}> · accept 终止分发`, 'Plugin')
+          return
+        }
+        if (res) {
+          util.makeLog('info', `${i.name} <${i.key}> · accept 命中`, 'Plugin')
+          break
+        }
       }
 
     for (const i of priority) {
-      if (i.plugin.rule)
-        for (const v of i.plugin.rule) {
-          /** 判断事件 */
-          if (v.event && !this.filtEvent(e, v)) continue
+      if (!i.plugin.rule) continue
+      for (const v of i.plugin.rule) {
+        /** 判断事件 */
+        if (v.event && !this.filtEvent(e, v)) continue
 
-          /** 正则匹配 */
-          if (!(v.reg as RegExp).test(e.msg as string)) continue
-          const instance = getInstance(i)
-          e.logFnc = `${logger.blue(`[${i.name}(${typeof v.fnc === 'string' ? v.fnc : v.fnc.name})]`)}`
+        /** 正则匹配 */
+        const regStr = String(v.reg)
+        if (!(v.reg as RegExp).test(String(e.msg))) continue
 
-          util.makeLog(
-            v.log === false ? 'debug' : 'info',
-            `${e.logText}${e.logFnc}${logger.yellow('[开始处理]')}`,
-            false,
-          )
+        const instance = getInstance(i)
+        const fncName = typeof v.fnc === 'string' ? v.fnc : v.fnc.name || 'fnc'
+        e.logFnc = `${logger.blue(`[${i.name}(${fncName})]`)}`
+        util.markPlugin(e, i.name, i.key)
+        recentItem.matched = `${i.name} <${i.key}> → ${fncName}`
 
-          /** 判断权限 */
-          if (this.filtPermission(e, v))
-            try {
-              const start_time = Date.now()
-              /** 绑定到插件实例，保持与云崽一致的 this 语义 */
-              const fn =
-                typeof v.fnc === 'function' ? v.fnc.bind(instance) : instance[v.fnc]?.bind(instance)
-              const res = fn && (await fn(e, (v.reg as RegExp).exec(String(e.msg)) || undefined))
-              metrics.record(i, Date.now() - start_time)
-              if (res === false) continue
+        /** 命中日志：插件 / 来源文件 / 正则 / 执行方法 / 优先级 */
+        util.makeLog(
+          v.log === false ? 'debug' : 'info',
+          `${logger.yellow('中 ▶')} ${logger.green(i.name)} <${i.key}> · 规则 ${logger.gray(regStr)} · 方法 ${fncName} · 优先级 ${i.priority}`,
+          'Plugin',
+        )
+
+        /** 判断权限 */
+        if (!this.filtPermission(e, v))
+          util.makeLog('info', `${i.name} · 权限不足（需要 ${v.permission}）`, 'Plugin')
+        else
+          try {
+            const startTime = Date.now()
+            /** 绑定到插件实例，保持与云崽一致的 this 语义 */
+            const fn =
+              typeof v.fnc === 'function' ? v.fnc.bind(instance) : instance[v.fnc]?.bind(instance)
+            const res = fn && (await fn(e, (v.reg as RegExp).exec(String(e.msg)) || undefined))
+            const cost = Date.now() - startTime
+            metrics.record(i, cost)
+
+            if (res === false) {
               util.makeLog(
                 v.log === false ? 'debug' : 'mark',
-                `${e.logText}${e.logFnc}${logger.green(`[完成${util.getTimeDiff(start_time)}]`)}`,
-                false,
+                `${logger.green(i.name)} · 返回 false，继续匹配后续规则 · ${cost}ms`,
+                'Plugin',
               )
-            } catch (err) {
-              util.makeLog('error', [`${e.logText}${e.logFnc}`, err], false)
+              continue
             }
-          return
-        }
+            const resText =
+              res === undefined || res === true
+                ? ''
+                : ` · 返回 ${typeof res === 'object' ? 'object' : util.truncate(res, 16)}`
+            util.makeLog(
+              v.log === false ? 'debug' : 'mark',
+              `${logger.green(i.name)} <${i.key}> · 完成 · ${logger.green(`${cost}ms`)}${resText}`,
+              'Plugin',
+            )
+          } catch (err) {
+            util.makeLog('error', [`${i.name} <${i.key}> · 执行出错`, err], 'Plugin')
+          }
+        return
+      }
     }
 
-    util.makeLog('debug', `${e.logText}${logger.blue('[暂无插件处理]')}`, false)
+    util.makeLog('debug', `未命中插件 · ${scene} · ${util.truncate(e.msg || util.describeMsg(e.message))}`, 'Msg')
   }
 
   /** 过滤事件 */
@@ -516,12 +589,33 @@ class PluginsLoader {
       }
 
       let res
+      const sendStart = Date.now()
       try {
         res = await reply(msg)
       } catch (err) {
         util.makeLog('error', ['发送消息错误', msg, err], e.self_id)
         res = { error: [err] }
       }
+
+      /** 发出消息日志：目标 / 内容 / 由哪个插件发出 / 耗时 */
+      const target = e.isGroup || e.group_id ? `群 ${e.group_name || ''}(${e.group_id})` : `好友 ${e.user_id}`
+      const content = util.describeMsg(msg)
+      const byPlugin = e.logPlugin ? ` · 由 ${logger.cyan(e.logPlugin)}` : ''
+      const cost = Date.now() - sendStart
+      const failed = Boolean(res?.error)
+      util.makeLog(
+        failed ? 'error' : 'info',
+        `发 ${failed ? '✖' : '▶'} ${target} · ${logger.yellow(content)}${byPlugin} · ${cost}ms${
+          failed ? ` · ${util.truncate(res.error?.[0]?.message ?? res.error)}` : ''
+        }`,
+        'Msg',
+      )
+      this.pushRecent(this.recent.send, {
+        time: Date.now(),
+        scene: target,
+        content,
+        plugin: e.logPlugin || '',
+      })
 
       if (recallMsg > 0 && res?.message_id) {
         if (e.group?.recallMsg)

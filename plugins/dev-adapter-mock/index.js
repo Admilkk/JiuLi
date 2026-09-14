@@ -27,7 +27,8 @@ function makeContact(type, id) {
     sendMsg(msg, ...args) {
       const record = { type, id, msg, at: Date.now() }
       SENT.push(record)
-      logger.mark(`[Mock发送][${type}:${id}]`, Bot.String(msg).slice(0, 300))
+      /** 内容由内核的「发 ▶」日志统一输出，这里仅在 debug 下补充原始结构 */
+      logger.debug(`[Mock] ${type}:${id} · ${Bot.describeMsg ? Bot.describeMsg(msg) : typeof msg}`)
       return { message_id: `mock-${Date.now()}-${SENT.length}`, ...record }
     },
     recallMsg(message_id) {

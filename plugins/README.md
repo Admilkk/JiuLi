@@ -13,6 +13,7 @@
 | `dev-adapter-mock/` | **开发调试适配器**：不接协议端，只在日志里打印机器人发出的消息；测试脚本用它注入事件 | 可以删（删除后 `pnpm test` 会失败） |
 | `example-class/` | **示例：类形态插件**（改个名字就能当自己的插件写） | 可以删 |
 | `example-dsl/` | **示例：函数式 DSL 插件** | 可以删 |
+| `example-render/` | **渲染自检插件**：`#渲染测试` `#渲染列表` `#渲染图片` `#渲染长图` `#渲染状态`，同时是渲染写法的参考 | 可以删 |
 | `<第三方插件>/` | 从网上 clone / 下载的插件，例如 `Yunzai-QQBot-Plugin`、`miao-plugin`。**不入 git**，依赖由 `pnpm install` 自动装 | 随意 |
 | `_test-fixtures/` | 冒烟测试的临时夹具（`pnpm test` 自动生成、跑完自动删除） | 不用管，测试结束自己消失 |
 
@@ -71,10 +72,11 @@ export default class MyPlugin extends JiuLiPlugin {
 **第 3 步：写功能**
 
 - 发消息：`e.reply('文本')` / `e.reply('带引用', true)` / `e.reply([segment.at(e.user_id), '\n你好'])`
-- 发图片：`const img = await this.render('hello/index', { title: '标题' })`（模板放 `resources/hello/index.html`）
+- 发图片：`await e.reply(await this.render('hello/index', { title: '标题' }))`（模板放 `resources/hello/index.html`）
 - 定时任务：`task: [{ name: '每日', cron: '0 8 * * *', fnc: 'daily' }]`
 - 会话（等用户下一条消息）：`this.setContext('waiting')` → 再写一个 `waiting()` 方法接收
 - 数据存储：`this.dataDir`（插件私有目录）、`redis`（全局）、`Bot.getMap('data/xxx')`
+- 排查问题：`#诊断`（适配器/在线账号/最近收发）、日志里的 `[  Plugin ]` 与 `[   Msg   ]` 行
 
 **完整说明**：见 [`docs/plugin-guide.md`](../docs/plugin-guide.md)（事件对象字段、权限、上下文、渲染、适配器等）。
 

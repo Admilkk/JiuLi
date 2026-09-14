@@ -63,11 +63,35 @@ pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启
 
 | 位置 | 指令 |
 |---|---|
-| `plugins/system` | `#帮助` `#插件列表` `#状态`（消息统计查询） `#版本` `#设置主人` `#撤回` `#添加/#删除/#消息列表`（词条） `#Bot上线/#Bot下线` |
+| `plugins/system` | `#帮助` `#插件列表` `#状态`（消息统计查询） `#诊断`（排查没响应） `#版本` `#设置主人` `#撤回` `#添加/#删除/#消息列表`（词条） `#Bot上线/#Bot下线` |
 | `plugins/other` | `#重启` `#关机` `#开机` `#停止` `#日志[条数][关键词]` `#错误日志` `#更新` `#强制更新` `#全部更新` `#更新日志` |
 | `plugins/adapter` | `stdin`（标准输入） |
 | `plugins/dev-adapter-mock` | 无协议端调试适配器 |
 | `plugins/example-class` / `example-dsl` | 原生类 / DSL 插件示例 |
+| `plugins/example-render` | 渲染自检：`#渲染测试` `#渲染列表` `#渲染图片` `#渲染长图` `#渲染状态` |
+
+### 日志
+
+```
+──────── JiuLi ────────
+JiuLi v0.1.0 启动中…
+兼容模式 · 对外标识 TRSS-Yunzai v3.1.3
+[  Server ] 启动 HTTP 服务器 http://[::]:2536
+[  Render ] 渲染后端 puppeteer 已就绪 · 类型 image · 支持 script 是
+[  Plugin ] 插件 26 个 · 规则 47 条 · 事件监听 8 个 · 定时任务 2 个 · 用时 1秒768
+[ Adapter ] 适配器 3 个 · Mock(QQ) · 标准输入(stdin) · QQBot(QQBot)
+[  Online ] JiuLi 就绪 · 用时 3秒234 · 在线账号 2 个
+──────── 启动完成 ────────
+
+[   Msg   ] 收 ◀ 群 测试群(888777666) · 小明(10001) · 主人 · #状态
+[  Plugin ] 中 ▶ 状态统计 <system/status.js> · 规则 /^#(状态|统计)/ · 方法 status · 优先级 5000
+[   Msg   ] 发 ▶ 群 测试群(888777666) · 转发(2节点) · 由 状态统计 · 0ms
+[  Plugin ] 状态统计 <system/status.js> · 完成 · 73ms
+```
+
+- 收到/发出消息的内容都会记录（含图片大小、@、转发节点数等摘要），`config/config/bot.yaml → log_msg: false` 可关闭
+- 浏览器启动细节：程序路径 / 模式 / 参数 / 数据目录 / 重启与空闲策略，截图会记录模板、体积、耗时、累计张数
+- `#日志` 可直接把最近日志发到聊天里；日志文件在 `logs/jiuli.YYYY-MM-DD.log`（错误另存 `logs/error/`）
 
 ### 开始写自己的插件
 
@@ -257,6 +281,8 @@ node jiuli.mjs status   # 环境与运行状态
 - [x] 一键启动与进程管理：`jiuli` CLI + pm2（`pnpm start / stop / rs / log`）
 - [x] 冒烟测试 21 项：旧插件 rule/accept/上下文 + 原生双形态 + 内置插件 + 词条 + 计数 + 渲染
 - [x] 适配器实机验证：stdin（终端交互）、Yunzai-QQBot-Plugin（QQ 官方机器人）
+- [x] 日志重写：消息收发内容（收 ◀ / 发 ▶）、命中插件与正则、浏览器启动细节、启动摘要
+- [x] `#诊断` 指令（适配器 / 在线账号 / 插件 / 渲染 / 最近收发）+ 渲染自检插件 `example-render`
 - [ ] Phase 2：`plugins/adapter/*`（OneBotv11 / Milky / Satori …）实机验证与补齐
 - [ ] Phase 3：原生插件脚手架、类型包细化、`Bot.express` 路由助手、WebUI 配置页
 - [ ] Phase 4：指标面板、热重载补全（含 index.js 目录与 resources）

@@ -10,7 +10,7 @@ import template from 'art-template'
 import chokidar from 'chokidar'
 import path from 'node:path'
 import fs from 'node:fs'
-import { logger } from '../log.js'
+import util from '../util.js'
 
 export default class Renderer {
   id: string
@@ -51,7 +51,7 @@ export default class Renderer {
       try {
         this.html[tplFile] = fs.readFileSync(tplFile, 'utf8')
       } catch {
-        logger.error(`加载html错误：${tplFile}`)
+        util.makeLog('error', `模板文件不存在或无法读取 · ${tplFile}`, 'Render')
         return false
       }
       this.watch(tplFile)
@@ -70,7 +70,7 @@ export default class Renderer {
     const savePath = `./temp/html/${name}/${data.saveId ?? name}.html`
     fs.writeFileSync(savePath, tmpHtml)
 
-    logger.debug(`[图片生成][使用模板] ${savePath}`)
+    util.makeLog('debug', `模板已渲染 · ${data.tplFile} → ${savePath}`, 'Render')
     return savePath
   }
 
@@ -80,7 +80,7 @@ export default class Renderer {
     const watcher = chokidar.watch(tplFile)
     watcher.on('change', () => {
       delete this.html[tplFile]
-      logger.mark(`[修改html模板] ${tplFile}`)
+      util.makeLog('info', `模板已更新（缓存失效）· ${tplFile}`, 'Render')
     })
     this.watcher[tplFile] = watcher
   }

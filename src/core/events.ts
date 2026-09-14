@@ -32,19 +32,18 @@ export class ListenerLoader {
   async load() {
     const Bot = (globalThis as any).Bot
 
-    util.makeLog('info', '-----------', 'Listener')
-    util.makeLog('info', '加载监听事件中...', 'Listener')
+    util.makeLog('info', '加载事件监听器 lib/events/ …', 'Listener')
     const files = (await fs.readdir('./lib/events').catch(() => [] as string[])).filter(f => f.endsWith('.js'))
     const eventPromise = files.map(file => this.loadEvent(file))
     await Promise.allSettled(eventPromise)
-    util.makeLog('info', `加载监听事件[${eventPromise.length}个]`, 'Listener')
+    util.makeLog('info', `事件监听器 ${eventPromise.length} 个`, 'Listener')
 
-    util.makeLog('info', '-----------', 'Adapter')
-    util.makeLog('info', '加载适配器中...', 'Adapter')
+    util.makeLog('info', '加载适配器 …', 'Adapter')
     const adapters = [...(Bot.adapter as any[])]
     const adapterPromise = adapters.map(adapter => this.loadAdapter(adapter))
     await Promise.allSettled(adapterPromise)
-    util.makeLog('info', `加载适配器[${adapterPromise.length}个]`, 'Adapter')
+    const names = adapters.map((a: any) => `${a.name}(${a.id})`).join(' · ')
+    util.makeLog('info', `适配器 ${adapterPromise.length} 个${names ? ` · ${names}` : ''}`, 'Adapter')
   }
 
   async loadEvent(file: string) {

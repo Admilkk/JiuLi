@@ -194,14 +194,48 @@ try {
 } catch {}
 check('消息计数批量写回 Redis', countKeys.length > 0, countKeys.slice(0, 2).join(', '))
 
-/* ---------- 12. 渲染管线（puppeteer + 本机 Edge，失败可容忍） ---------- */
+/* ---------- 12. 渲染管线（puppeteer + 本机 Chromium/Edge） ---------- */
+const imgCount = () => sent.filter(i => JSON.stringify(i.msg).includes('"type":"image"')).length
+
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#例子渲染' })
-await sleep(15000)
+await sleep(20000)
+check('渲染：原生 this.render（example-class）', json().includes('"type":"image"'), json().includes('渲染失败') ? '渲染后端不可用' : '')
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染测试' })
+await sleep(4000)
+check('渲染：卡片模板（循环 / 渐变 / 中文排版）', imgCount() > 0)
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染列表' })
+await sleep(4000)
+check('渲染：表格与模板循环', imgCount() > 0)
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染图片' })
+await sleep(4000)
+check('渲染：本地图片资源（SVG + pluResPath）', imgCount() > 0)
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染长图' })
+await sleep(12000)
+check('渲染：长图自动分页（puppeteer.screenshots）', imgCount() >= 2, `${imgCount()} 张`)
+
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染状态' })
+await sleep(600)
+check('渲染：后端状态（#渲染状态）', json().includes('渲染后端'))
+
+/* ---------- 13. #诊断 ---------- */
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#诊断' })
+await sleep(600)
+const diag = json()
 check(
-  '渲染管线（puppeteer）',
-  json().includes('base64://') || json().includes('"type":"image"'),
-  json().includes('渲染失败') ? '渲染后端不可用（已优雅降级）' : json().slice(0, 60),
+  '内置 #诊断（适配器/在线账号/最近收发）',
+  diag.includes('适配器') && diag.includes('在线账号') && diag.includes('最近收到'),
+  diag.slice(0, 80),
 )
 
 /* ---------- 汇总 ---------- */

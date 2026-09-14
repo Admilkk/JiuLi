@@ -24,6 +24,7 @@ temp/
 !/plugins/dev-adapter-mock
 !/plugins/example-class
 !/plugins/example-dsl
+!/plugins/example-render
 
 # 插件在 config/ 根目录写配置（可能含账号凭据），不入库
 /config/*

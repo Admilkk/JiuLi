@@ -61,9 +61,9 @@ export async function start() {
   const bot = new JiuLiBot() as any
   await injectGlobals(bot)
 
-  logger.mark('----^_^----')
-  logger.mark(logger.yellow(`JiuLi v${realVersion} 启动中...`))
-  if (compat.spoof_yunzai) logger.info(logger.cyan('兼容模式：TRSS-Yunzai 生态插件可直接使用'))
+  logger.mark('──────── JiuLi ────────')
+  logger.mark(logger.yellow(`JiuLi v${realVersion} 启动中…`))
+  if (compat.spoof_yunzai) logger.info(logger.cyan(`兼容模式 · 对外标识 TRSS-Yunzai v${compat.version || ''}`))
 
   /** 捕获未处理的错误 */
   for (const i of ['uncaughtException', 'unhandledRejection'] as const)

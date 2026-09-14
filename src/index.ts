@@ -64,10 +64,10 @@ export class JiuLiPlugin extends BasePlugin {
   }
 
   /**
-   * 渲染模板为图片（不发送）
+   * 渲染模板为图片，返回可直接 e.reply() 发送的内容（消息段或 Buffer），失败返回 false
    * @param tpl 模板路径，相对插件 resources 目录，如 'help/index'
    * @param data 模板数据
-   * @param opts 渲染选项；retType 默认 base64
+   * @param opts 渲染选项（imgType/quality/multiPage/pageGotoParams 等）
    */
   async render(tpl: string, data: any = {}, opts: RenderOptions = {}) {
     const plugin = this.__key || this.name
@@ -89,8 +89,21 @@ export class JiuLiPlugin extends BasePlugin {
     }
     const img = await renderService.render(`${plugin}/${paths.join('/')}`, tplData)
     if (!img) return false
-    if (opts.retType === 'base64') return `base64://${Buffer.from(img).toString('base64')}`
-    return img
+    const { default: segment } = await import('./core/segment.js')
+    return segment.image(img)
+  }
+
+  /**
+   * 渲染模板并返回 base64:// 字符串（用于自行拼接消息段）
+   * @returns `base64://...` 或 false
+   */
+  async renderBase64(tpl: string, data: any = {}, opts: RenderOptions = {}) {
+    const ret: any = await this.render(tpl, data, opts)
+    if (!ret) return false
+    const file = ret?.file ?? ret?.data?.file ?? ret
+    if (Buffer.isBuffer(file)) return `base64://${file.toString('base64')}`
+    if (typeof file === 'string') return file.startsWith('base64://') ? file : `base64://${file}`
+    return false
   }
 }
 

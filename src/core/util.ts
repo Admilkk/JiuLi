@@ -17,6 +17,97 @@ import cfg from './config/index.js'
 import { logger } from './log.js'
 
 class Util {
+  /** 截断文本（日志预览用） */
+  truncate(str: any, length = 60) {
+    const text = String(str ?? '').replace(/\s+/g, ' ').trim()
+    return text.length > length ? `${text.slice(0, length)}…(${text.length}字)` : text
+  }
+
+  /**
+   * 描述消息内容（日志用）
+   * 支持字符串 / 单个消息段 / 消息段数组，输出如 `"你好" + @10001 + 图片(11.5KB)`
+   */
+  describeMsg(msg: any): string {
+    if (msg === undefined || msg === null) return '(空)'
+    const items = Array.isArray(msg) ? msg : [msg]
+    const parts: string[] = []
+    for (const item of items) {
+      if (typeof item !== 'object' || item === null) {
+        parts.push(`"${this.truncate(item)}"`)
+        continue
+      }
+      switch (item.type) {
+        case 'text':
+          parts.push(`"${this.truncate(item.text)}"`)
+          break
+        case 'image': {
+          const size = Buffer.isBuffer(item.file) ? ` ${(item.file.length / 1024).toFixed(1)}KB` : ''
+          parts.push(`图片${size}`)
+          break
+        }
+        case 'record':
+          parts.push('语音')
+          break
+        case 'video':
+          parts.push('视频')
+          break
+        case 'file':
+          parts.push(`文件(${item.name || '未命名'})`)
+          break
+        case 'at':
+          parts.push(`@${item.qq}`)
+          break
+        case 'reply':
+          parts.push('引用')
+          break
+        case 'face':
+          parts.push(`表情(${item.id})`)
+          break
+        case 'node':
+          parts.push(`转发(${Array.isArray(item.data) ? item.data.length : 1}节点)`)
+          break
+        case 'button':
+          parts.push('按钮')
+          break
+        case 'markdown':
+          parts.push('markdown')
+          break
+        case 'raw':
+          parts.push('raw')
+          break
+        default:
+          parts.push(item.type ? `${item.type}` : '未知段')
+      }
+    }
+    return parts.join(' + ') || '(空)'
+  }
+
+  /** 事件场景描述（日志用），如 `群 测试群(888777666) · 测试用户(10001) · 主人` */
+  describeScene(e: any): string {
+    const parts: string[] = []
+    if (e.isGroup || e.group_id) parts.push(`群 ${e.group_name || ''}(${e.group_id})`)
+    else if (e.user_id) parts.push(`好友 ${e.sender?.nickname || ''}(${e.user_id})`)
+    else if (e.notice_type || e.request_type) parts.push(`${e.post_type}.${e.notice_type || e.request_type}`)
+
+    const who = e.sender?.card || e.sender?.nickname
+    if (who && (e.isGroup || e.group_id)) parts.push(`${who}(${e.user_id})`)
+    else if (who && !e.user_id) parts.push(`${who}`)
+
+    const tags: string[] = []
+    if (e.isMaster) tags.push('主人')
+    if (e.atBot) tags.push('@Bot')
+    if (e.hasAlias) tags.push('别名')
+    if (e.isPrivate) tags.push('私聊')
+    if (tags.length) parts.push(tags.join('/'))
+    return parts.join(' · ') || String(e.self_id ?? '')
+  }
+
+  /** 日志中标记的消息来源（分发时写入，回复时读取） */
+  markPlugin(e: any, name: string, key: string) {
+    e.logPlugin = name
+    e.logPluginKey = key
+  }
+
   makeLogID(id: any) {
     if (!id) return cfg.bot?.log_align || 'JiuLi'
     if (!cfg.bot?.log_align) return id

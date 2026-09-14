@@ -6,6 +6,10 @@ log_length: 10000
 log_object: true
 # 日志ID对齐
 log_align: "  JiuLi  "
+# 记录消息收发内容（收 ◀ / 发 ▶），false 则只记录插件执行
+log_msg: true
+# 消息内容预览长度
+log_msg_length: 60
 # 插件加载超时
 plugin_load_timeout: 60
 # 监听文件变化
