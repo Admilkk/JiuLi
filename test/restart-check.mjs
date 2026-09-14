@@ -8,11 +8,15 @@
  */
 import fs from 'node:fs'
 
-fs.mkdirSync('config/config', { recursive: true })
-fs.writeFileSync('config/config/bot.yaml', 'log_level: info\nplugin_load_timeout: 60\nfile_watch: false\n')
-fs.writeFileSync('config/config/other.yaml', 'master:\n  - "mock:10001"\n')
-fs.writeFileSync('config/config/server.yaml', 'url: http://localhost:25380\nport: 25380\nredirect: https://x\nauth:\n')
-fs.writeFileSync('config/config/group.yaml', 'default:\n  groupCD: 0\n  singleCD: 0\n  onlyReplyAt: 0\n')
+/** 测试用隔离配置目录：绝不碰真实的 config/config */
+process.env.JIULI_CONFIG_DIR = 'test/.tmp-config/'
+
+
+fs.mkdirSync('test/.tmp-config', { recursive: true })
+fs.writeFileSync('test/.tmp-config/bot.yaml', 'log_level: info\nplugin_load_timeout: 60\nfile_watch: false\n')
+fs.writeFileSync('test/.tmp-config/other.yaml', 'master:\n  - "mock:10001"\n')
+fs.writeFileSync('test/.tmp-config/server.yaml', 'url: http://localhost:25380\nport: 25380\nredirect: https://x\nauth:\n')
+fs.writeFileSync('test/.tmp-config/group.yaml', 'default:\n  groupCD: 0\n  singleCD: 0\n  onlyReplyAt: 0\n')
 
 const { start, RESTART_CODE } = await import('../lib/core/start.js')
 const bot = await start()

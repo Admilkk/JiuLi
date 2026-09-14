@@ -8,6 +8,10 @@
  */
 import fs from 'node:fs'
 
+/** 测试用隔离配置目录：绝不碰真实的 config/config */
+process.env.JIULI_CONFIG_DIR = 'test/.tmp-config/'
+
+
 const CHILD = 'test/.tmp-supervisor-child.mjs'
 const LOG = 'test/.tmp-supervisor.log'
 

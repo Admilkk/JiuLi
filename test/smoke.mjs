@@ -7,6 +7,10 @@
  * 用法：node test/smoke.mjs
  */
 import fs from 'node:fs'
+
+/** 测试用隔离配置目录：绝不碰真实的 config/config */
+process.env.JIULI_CONFIG_DIR = 'test/.tmp-config/'
+
 import path from 'node:path'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -26,17 +30,17 @@ for (const file of fs.readdirSync('test/fixtures')) {
 }
 
 /** 测试配置（config/config 为运行时目录，已 gitignore） */
-fs.mkdirSync('config/config', { recursive: true })
+fs.mkdirSync('test/.tmp-config', { recursive: true })
 fs.writeFileSync(
-  'config/config/other.yaml',
+  'test/.tmp-config/other.yaml',
   ['master:', '  - "mock:10001"', 'masterQQ:', '  - "10001"', 'autoFriend: 1', 'autoGroup: 0', 'autoQuit: 0'].join('\n'),
 )
 fs.writeFileSync(
-  'config/config/server.yaml',
+  'test/.tmp-config/server.yaml',
   ['url: http://localhost:25360', 'port: 25360', 'redirect: https://gitee.com/fox-glaze/jiuli', 'auth:'].join('\n'),
 )
 fs.writeFileSync(
-  'config/config/group.yaml',
+  'test/.tmp-config/group.yaml',
   ['default:', '  groupCD: 0', '  singleCD: 0', '  onlyReplyAt: 0', '  botAlias:', '    - 玖璃'].join('\n'),
 )
 
@@ -246,4 +250,5 @@ for (const r of results) if (!r.ok) console.log(`   未通过：${r.name}`)
 try {
   fs.rmSync(FIXTURE_DIR, { recursive: true, force: true })
 } catch {}
+try { fs.rmSync('test/.tmp-config', { recursive: true, force: true }) } catch {}
 process.exit(pass === results.length ? 0 : 1)

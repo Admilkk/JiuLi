@@ -47,6 +47,11 @@ class Cfg {
   watcher: Record<string, any> = {}
   _package?: Record<string, any>
 
+  /** 用户配置目录（可用 JIULI_CONFIG_DIR 覆盖，测试/多实例时避免污染真实配置） */
+  get userDir(): string {
+    return process.env.JIULI_CONFIG_DIR || 'config/config/'
+  }
+
   constructor() {
     this.initCfg()
     return new Proxy(this, {
@@ -61,9 +66,9 @@ class Cfg {
     })
   }
 
-  /** 初始化配置目录：default_config → config */
+  /** 初始化配置目录：default_config → 用户配置目录 */
   initCfg() {
-    const dir = 'config/config/'
+    const dir = this.userDir
     const defDir = 'config/default_config/'
     try {
       const filesDef = fs.readdirSync(defDir).filter(f => f !== 'pm2.yaml')
@@ -76,7 +81,7 @@ class Cfg {
       const pm2File = 'config/pm2.yaml'
       if (!fs.existsSync(pm2File) && fs.existsSync(`${defDir}pm2.yaml`))
         fs.copyFileSync(`${defDir}pm2.yaml`, pm2File)
-      /** pm2.yaml 若被误复制进 config/config/ 则清理 */
+      /** pm2.yaml 若被误复制进用户配置目录则清理 */
       if (fs.existsSync(`${dir}pm2.yaml`)) fs.rmSync(`${dir}pm2.yaml`, { force: true })
     } catch (err) {
       safeLog(`[Config] 初始化配置目录失败：${err}`)
@@ -195,7 +200,8 @@ class Cfg {
   getYaml(type: string, name: string): any {
     const key = `${type}.${name}`
     if (key in this.config) return this.config[key]
-    const file = path.join('config', type, `${name}.yaml`)
+    const base = type === 'config' ? this.userDir : `config/${type}/`
+    const file = path.join(base, `${name}.yaml`)
     try {
       this.config[key] = YAML.parse(fs.readFileSync(file, 'utf8'))
     } catch (err: any) {

@@ -4,7 +4,8 @@ import YAML from 'yaml'
 import { JiuLiPlugin } from 'jiuli'
 
 const code = {}
-const file = 'config/config/other.yaml'
+/** 用户配置目录（支持 JIULI_CONFIG_DIR 覆盖） */
+const configFile = () => `${cfg.userDir}other.yaml`.replace(/\\/g, '/').replace(/\/+/g, '/')
 
 /**
  * #设置主人
@@ -60,8 +61,8 @@ export default class Master extends JiuLiPlugin {
     delete code[key]
     this.finish('verify')
     if (verified) {
-      await this.edit(file, 'masterQQ', this.e.user_id)
-      await this.edit(file, 'master', `${this.e.self_id}:${this.e.user_id}`)
+      await this.edit(configFile(), 'masterQQ', this.e.user_id)
+      await this.edit(configFile(), 'master', `${this.e.self_id}:${this.e.user_id}`)
       return this.reply(`[${this.e.user_id}] 设置主人完成`, true)
     }
     return this.reply('验证码错误', true)

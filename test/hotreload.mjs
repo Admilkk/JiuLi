@@ -5,16 +5,20 @@
  * 用法：node test/hotreload.mjs
  */
 import fs from 'node:fs'
+
+/** 测试用隔离配置目录：绝不碰真实的 config/config */
+process.env.JIULI_CONFIG_DIR = 'test/.tmp-config/'
+
 import path from 'node:path'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 /** 测试配置（config/config 已 gitignore） */
-fs.mkdirSync('config/config', { recursive: true })
-fs.writeFileSync('config/config/bot.yaml', 'log_level: info\nplugin_load_timeout: 60\nfile_watch: true\nlog_msg: true\n')
-fs.writeFileSync('config/config/other.yaml', 'master:\n  - "mock:10001"\nautoFriend: 1\nautoGroup: 0\nautoQuit: 0\n')
-fs.writeFileSync('config/config/server.yaml', 'url: http://localhost:25370\nport: 25370\nredirect: https://x\nauth:\n')
-fs.writeFileSync('config/config/group.yaml', 'default:\n  groupCD: 0\n  singleCD: 0\n  onlyReplyAt: 0\n')
+fs.mkdirSync('test/.tmp-config', { recursive: true })
+fs.writeFileSync('test/.tmp-config/bot.yaml', 'log_level: info\nplugin_load_timeout: 60\nfile_watch: true\nlog_msg: true\n')
+fs.writeFileSync('test/.tmp-config/other.yaml', 'master:\n  - "mock:10001"\nautoFriend: 1\nautoGroup: 0\nautoQuit: 0\n')
+fs.writeFileSync('test/.tmp-config/server.yaml', 'url: http://localhost:25370\nport: 25370\nredirect: https://x\nauth:\n')
+fs.writeFileSync('test/.tmp-config/group.yaml', 'default:\n  groupCD: 0\n  singleCD: 0\n  onlyReplyAt: 0\n')
 
 const FILE = 'plugins/example/hot-reload-test.js'
 const DIR = 'plugins/hotreload-newdir'
@@ -118,4 +122,5 @@ check('卸载后不再响应（无匹配插件）', !json().includes('热重载�
 fs.rmSync(DIR, { recursive: true, force: true })
 const pass = results.filter(r => r.ok).length
 console.log(`\n=== 热重载测试：${pass}/${results.length} 通过 ===`)
+try { fs.rmSync('test/.tmp-config', { recursive: true, force: true }) } catch {}
 process.exit(pass === results.length ? 0 : 1)

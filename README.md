@@ -254,7 +254,6 @@ export default class Demo extends JiuLiPlugin {
 ## 配置
 
 `config/config/jiuli.yaml`（首次启动自动生成）：
-
 ```yaml
 compat:
   spoof_yunzai: true        # 伪装成 TRSS-Yunzai（部分插件据此判断框架）
@@ -283,6 +282,9 @@ node jiuli.mjs status   # 环境与运行状态
 
 修改兼容层（`lib/**` 手写 JS）后无需编译；修改内核或内置插件（`src/**`、`plugins/**` 的原生插件）后需 `pnpm build`。
 
+> **多实例 / 测试隔离**：设置环境变量 `JIULI_CONFIG_DIR=/path/to/config/` 可让该实例使用独立的用户配置目录
+> （测试脚本就是这么做的，默认 `config/config/`）。
+>
 > **维护提示**：升级或调试时**不要删除 `data/`、`logs/`、`config/config/`**——它们是运行状态（数据、日志、主人与群配置）。
 > 框架已对"目录被清理"做了自愈（写文件前先确保目录存在），但正在运行的实例仍可能短暂报错。
 > 需要重置配置时，删掉对应单个 `config/config/*.yaml` 让它重新生成即可。
