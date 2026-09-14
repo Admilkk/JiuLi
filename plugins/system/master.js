@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import { ulid } from 'ulid'
 import YAML from 'yaml'
-import { JiuLiPlugin } from 'jiuli'
+import { JiuLiPlugin, cfg } from 'jiuli'
 
 const code = {}
 /** 用户配置目录（支持 JIULI_CONFIG_DIR 覆盖） */

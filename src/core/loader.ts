@@ -513,6 +513,8 @@ class PluginsLoader {
           ? `这条指令没有被执行（参数或触发条件不符）· 可发 #插件列表 查看可用指令`
           : `这条指令没有响应 · 如果它是主人专属指令，请先发 #设置主人 绑定主人账号；也可能是参数不符`
         util.makeLog('info', `提示无响应 · ${util.truncate(e.msg, 20)} · 命中 ${commandMatched.join('/')}`, 'Msg')
+        /** 提示由框架发出，避免日志里错误归属到最后一个匹配到的插件 */
+        e.logPlugin = 'JiuLi'
         await e.reply?.(tip)
       }
     }
