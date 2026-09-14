@@ -102,7 +102,7 @@ check('新目录插件的指令可用', json().includes('来自新目录插件')
 sent.length = 0
 emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#重载 hot-reload-test' })
 await sleep(4000)
-check('内置 #重载 指令', json().includes('重载完成'), json().replace(/\\"/g, '"').slice(0, 90))
+check('内置 #重载 指令', json().includes('处理完成'), json().replace(/\\"/g, '"').slice(0, 90))
 
 /** 5. 删除文件 */
 fs.rmSync(FILE, { force: true })

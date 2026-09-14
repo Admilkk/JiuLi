@@ -917,6 +917,12 @@ class PluginsLoader {
     return this.pluginCountMap.has(key) || this.priority.some(i => i.key === key)
   }
 
+  /** 按 key 加载（新增的插件文件/目录）；已加载则重载 */
+  async reloadKey(key: string) {
+    if (this.isLoaded(key)) return this.changePlugin(key)
+    return this.loadKey(key)
+  }
+
   /** 按 key 加载（新增的插件文件/目录） */
   private async loadKey(key: string) {
     const target = key.endsWith('.js') ? key : `${key}/index.js`
