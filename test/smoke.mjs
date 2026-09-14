@@ -7,8 +7,23 @@
  * 用法：node test/smoke.mjs
  */
 import fs from 'node:fs'
+import path from 'node:path'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+/**
+ * 旧插件夹具：从 test/fixtures/ 复制到 plugins/_test-fixtures/（临时目录，测试结束删除）
+ * 复制是必须的 —— 旧插件用相对路径 import 框架（../../lib/...），只有放在 plugins/<目录>/ 下才成立
+ */
+const FIXTURE_DIR = 'plugins/_test-fixtures'
+fs.rmSync(FIXTURE_DIR, { recursive: true, force: true })
+fs.mkdirSync(FIXTURE_DIR, { recursive: true })
+let fixtureCount = 0
+for (const file of fs.readdirSync('test/fixtures')) {
+  if (!file.endsWith('.js')) continue
+  fs.copyFileSync(path.join('test/fixtures', file), path.join(FIXTURE_DIR, file))
+  fixtureCount++
+}
 
 /** 测试配置（config/config 为运行时目录，已 gitignore） */
 fs.mkdirSync('config/config', { recursive: true })
@@ -38,11 +53,11 @@ const check = (name, ok, extra) => {
   results.push({ name, ok })
   console.log(`${ok ? '✅' : '❌'} ${name}${extra ? ` — ${extra}` : ''}`)
 }
-/** 旧插件夹具缺失时跳过对应用例（夹具来自 TRSS-Yunzai 插件目录，不入库） */
-const legacy = fs.existsSync('plugins/_legacy/喵一个.js')
+/** 旧插件夹具缺失时跳过对应用例（夹具来自 TRSS-Yunzai，见 test/fixtures/README.md） */
+const legacy = fixtureCount > 0
 const skip = name => {
   skipped.push(name)
-  console.log(`⏭️  ${name} — 跳过（未找到 plugins/_legacy 夹具）`)
+  console.log(`⏭️  ${name} — 跳过（未找到 test/fixtures 夹具）`)
 }
 const clear = () => (sent.length = 0)
 const json = () => JSON.stringify(sent)
@@ -193,5 +208,8 @@ check(
 const pass = results.filter(r => r.ok).length
 console.log(`\n=== 冒烟测试：${pass}/${results.length} 通过${skipped.length ? `，${skipped.length} 项跳过` : ''} ===`)
 for (const r of results) if (!r.ok) console.log(`   未通过：${r.name}`)
-if (skipped.length) console.log('   提示：将 TRSS-Yunzai 的部分插件复制到 plugins/_legacy/ 可运行完整兼容性用例')
+/** 清理临时夹具目录 */
+try {
+  fs.rmSync(FIXTURE_DIR, { recursive: true, force: true })
+} catch {}
 process.exit(pass === results.length ? 0 : 1)

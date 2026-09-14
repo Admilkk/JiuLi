@@ -15,22 +15,23 @@ temp/
 .redis-data/
 
 # ---- 插件与配置策略（与 TRSS-Yunzai 一致）----
-# 仅跟踪内置插件；第三方插件及其 node_modules 不入库
+# 仅跟踪内置插件与示例；第三方插件及其 node_modules 不入库
 /plugins/*
+!/plugins/README.md
 !/plugins/adapter
 !/plugins/system
 !/plugins/other
-!/plugins/jiuli-adapter-mock
-!/plugins/jiuli-example-class
-!/plugins/jiuli-example-dsl
+!/plugins/dev-adapter-mock
+!/plugins/example-class
+!/plugins/example-dsl
 
 # 插件在 config/ 根目录写配置（可能含账号凭据），不入库
 /config/*
 !/config/default_config/
 renderers/*/config.yaml
 
-# 冒烟测试夹具（从 TRSS-Yunzai 复制的旧插件样本）
-plugins/_legacy/
+# 冒烟测试夹具（test/fixtures 在运行时复制到此目录）
+plugins/_test-fixtures/
 
 # 编辑器
 .idea/

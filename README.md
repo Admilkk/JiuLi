@@ -43,6 +43,7 @@ pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启
 | `pnpm app` | 前台直接运行（`node .`） |
 | `pnpm build` / `pnpm watch` / `pnpm typecheck` | 编译 / 增量编译 / 类型检查 |
 | `pnpm test` | 冒烟测试（21 项） |
+| `pnpm jiuli create <名称>` | 生成插件骨架（`--dsl` 用函数式形态） |
 | `pnpm jiuli status` | 环境与运行状态 |
 
 启动模式：`node .`（internal）/ `node . start`（external）/ `node . pm2` / `node . daemon` / `node . stop`
@@ -65,15 +66,26 @@ pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启
 | `plugins/system` | `#帮助` `#插件列表` `#状态`（消息统计查询） `#版本` `#设置主人` `#撤回` `#添加/#删除/#消息列表`（词条） `#Bot上线/#Bot下线` |
 | `plugins/other` | `#重启` `#关机` `#开机` `#停止` `#日志[条数][关键词]` `#错误日志` `#更新` `#强制更新` `#全部更新` `#更新日志` |
 | `plugins/adapter` | `stdin`（标准输入） |
-| `plugins/jiuli-adapter-mock` | 无协议端调试适配器（不入库以外的插件） |
-| `plugins/jiuli-example-*` | 原生类 / DSL 插件示例 |
+| `plugins/dev-adapter-mock` | 无协议端调试适配器 |
+| `plugins/example-class` / `example-dsl` | 原生类 / DSL 插件示例 |
+
+### 开始写自己的插件
+
+```bash
+pnpm jiuli create my-plugin          # 生成 plugins/my-plugin/index.js（带注释的骨架）
+pnpm jiuli create my-plugin --dsl    # 函数式 DSL 形态
+```
+
+`plugins/` 里各种文件夹分别是什么、加载规则、最小示例：见 **[plugins/README.md](plugins/README.md)**；
+事件对象字段、权限、上下文会话、渲染、适配器等完整说明：见 **[docs/plugin-guide.md](docs/plugin-guide.md)**。
 
 ## 目录结构
 
 ```
 jiuli/
 ├─ app.js                 启动入口（启动模式切换）
-├─ jiuli.mjs              CLI：init / start / stop / rs / log / build / test / status
+├─ jiuli.mjs              CLI：init / create / start / stop / rs / log / build / test / status
+├─ templates/             插件骨架模板（pnpm jiuli create 使用）
 ├─ src/                   ★ 内核 TypeScript 源码（构建产物到 lib/core）
 │   ├─ index.ts           原生插件 API（JiuLiPlugin / definePlugin / command / task / accept ...）
 │   └─ core/              内核：bot / loader / plugin / config / redis / render / events / metrics ...
@@ -89,10 +101,11 @@ jiuli/
 │   ├─ modules/           oicq / md5 / node-fetch 兼容包（pnpm link:）
 │   └─ util.js            工具集合
 ├─ renderers/puppeteer/   渲染后端实现（可自行扩展 renderers/<name>/）
-├─ plugins/               插件目录
-│   ├─ adapter/  system/  other/     内置插件（随仓库）
-│   ├─ jiuli-example-*  jiuli-adapter-mock  示例与调试适配器（随仓库）
-│   └─ <第三方插件>/                  不入库（.gitignore），依赖由 pnpm workspace 安装
+├─ plugins/               插件目录（详见 plugins/README.md）
+│   ├─ adapter/  system/  other/                   内置插件（随仓库）
+│   ├─ example-class/  example-dsl/                示例插件（随仓库）
+│   ├─ dev-adapter-mock/                           调试适配器（随仓库）
+│   └─ <第三方插件>/                                不入库（.gitignore），依赖由 pnpm workspace 安装
 ├─ config/
 │   ├─ default_config/    默认配置（随仓库提供）
 │   ├─ config/            用户配置（首次启动自动生成，不入库）
@@ -166,7 +179,7 @@ jiuli/
 
 ## JiuLi 原生插件
 
-`plugins/jiuli-example-dsl` 与 `plugins/jiuli-example-class` 是两个可直接参考的示例。
+`plugins/example-dsl` 与 `plugins/example-class` 是两个可直接参考的示例。
 
 函数式 DSL：
 

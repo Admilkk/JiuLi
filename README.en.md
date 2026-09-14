@@ -28,7 +28,7 @@ node .          # start
 node test/smoke.mjs   # smoke test (legacy plugins + native plugins + render pipeline)
 ```
 
-Debug without a protocol backend: `plugins/jiuli-adapter-mock` logs every outgoing message;
+Debug without a protocol backend: `plugins/dev-adapter-mock` logs every outgoing message;
 set `JIULI_MOCK_STDIN=1` and feed one JSON event per line on stdin.
 
 ## License

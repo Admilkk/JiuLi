@@ -12,6 +12,16 @@ JiuLi 支持三种插件形态，共用同一套内核与分发机制：
 > `plugins/other`（重启/关机/更新/日志/版本）与 `plugins/adapter/stdin`（终端交互），
 > 可直接作为原生写法的参考实现。
 
+## 零、先生成骨架
+
+```bash
+pnpm jiuli create my-plugin          # 类形态（推荐，与云崽写法接近）
+pnpm jiuli create my-plugin --dsl    # 函数式 DSL
+```
+
+生成 `plugins/my-plugin/index.js`，文件里逐字段带注释。
+`plugins/` 目录里各文件夹分别是什么、加载规则、最小示例：见 [`plugins/README.md`](../plugins/README.md)。
+
 ---
 
 ## 一、目录结构
@@ -332,13 +342,13 @@ Bot.adapter.push({
 `contact` 需提供 `sendMsg(msg)`、`recallMsg(id)`、`makeForwardMsg(msg)`、`getInfo()` 等。
 `Bot.em` 会逐级 emit（`message.group.normal` → `message.group` → `message`），并自动补全事件字段。
 
-调试用适配器见 `plugins/jiuli-adapter-mock/`。
+调试用适配器见 `plugins/dev-adapter-mock/`。
 
 ---
 
 ## 九、调试与测试
 
-- `node .` 直接启动；`plugins/jiuli-adapter-mock` 会打印机器人发出的消息
+- `node .` 直接启动；`plugins/dev-adapter-mock` 会打印机器人发出的消息
 - `JIULI_MOCK_STDIN=1 node .` 后，stdin 每行一个 JSON 事件即可模拟收发
 - 日志等级：`config/config/bot.yaml → log_level: debug`
 - 性能指标：`#玖璃性能`（示例插件提供）或 `import { metrics } from 'jiuli'; metrics.summary()`

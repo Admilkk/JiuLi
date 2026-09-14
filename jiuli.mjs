@@ -186,14 +186,55 @@ function cmdStatus() {
   if (hasPm2()) pm2(['list'])
 }
 
+function cmdCreate(args) {
+  const name = args.find(a => !a.startsWith('-'))
+  const dsl = args.includes('--dsl')
+  if (!name) fail('用法：pnpm jiuli create <插件名> [--dsl]')
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) fail('插件名只能包含字母、数字、点、下划线、连字符')
+
+  const target = path.join(CWD, 'plugins', name)
+  if (fs.existsSync(target)) fail(`plugins/${name} 已存在`)
+
+  const tplDir = path.join(CWD, 'templates', dsl ? 'plugin-dsl' : 'plugin-class')
+  if (!fs.existsSync(tplDir)) fail(`缺少模板目录 ${tplDir}`)
+
+  const className = name
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map(s => s[0].toUpperCase() + s.slice(1))
+    .join('') || 'MyPlugin'
+
+  const copyDir = (from, to) => {
+    fs.mkdirSync(to, { recursive: true })
+    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+      const src = path.join(from, entry.name)
+      const dest = path.join(to, entry.name)
+      if (entry.isDirectory()) copyDir(src, dest)
+      else
+        fs.writeFileSync(
+          dest,
+          fs.readFileSync(src, 'utf8').replaceAll('{{name}}', name).replaceAll('{{ClassName}}', className),
+        )
+    }
+  }
+  copyDir(tplDir, target)
+
+  ok(`已创建 plugins/${name}（${dsl ? 'DSL' : '类'}形态）`)
+  console.log(`  编辑：plugins/${name}/index.js`)
+  console.log('  生效：重启（pnpm rs）；若改成平铺 js 文件则由内核热重载')
+  console.log('  文档：docs/plugin-guide.md')
+}
+
 function cmdHelp() {
   console.log(`JiuLi CLI
 
   node jiuli.mjs init          安装依赖 + 编译内核 + 生成配置
+  node jiuli.mjs create <名称> [--dsl]
+                               生成插件骨架到 plugins/<名称>/
   node jiuli.mjs start         pm2 后台启动（--fg 前台运行）
   node jiuli.mjs stop          停止
   node jiuli.mjs rs            重启
-  node jiuli.mjs log [条数]     查看日志
+  node jiuli.mjs log [条数]     查看日志（-f 持续输出）
   node jiuli.mjs build         编译内核
   node jiuli.mjs test          冒烟测试
   node jiuli.mjs status        环境与运行状态
@@ -204,6 +245,8 @@ function cmdHelp() {
 const [cmd = 'help', ...args] = process.argv.slice(2)
 const commands = {
   init: cmdInit,
+  create: () => cmdCreate(args),
+  new: () => cmdCreate(args),
   start: () => cmdStart(args),
   run: () => cmdStart(args),
   stop: cmdStop,
