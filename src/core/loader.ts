@@ -31,6 +31,30 @@ function truncate(str: string, length: number) {
   return str.length > length ? `${str.slice(0, length)}...` : str
 }
 
+/**
+ * 判断发送结果是否失败
+ * 各适配器返回格式不一：云崽系常见 { message_id, error: [] }（空数组表示成功），
+ * 也有返回 Error 实例、字符串或 { error: Error } 的，这里统一处理
+ */
+function hasSendError(res: any): boolean {
+  if (!res || typeof res !== 'object') return false
+  const err = res.error ?? res.err
+  if (err === undefined || err === null) return false
+  if (Array.isArray(err)) return err.length > 0
+  if (err instanceof Error) return true
+  return Boolean(err)
+}
+
+/** 从发送结果里提取可读的失败原因 */
+function describeSendError(res: any): string {
+  const err = res?.error ?? res?.err
+  const first = Array.isArray(err) ? err[0] : err
+  if (!first) return String(err ?? '未知错误')
+  if (typeof first === 'string') return first
+  if (first instanceof Error) return first.message
+  return String(first.message ?? first.code ?? first.msg ?? util.String(first))
+}
+
 function isEmptyObject(obj: any) {
   if (!obj) return true
   for (const _ in obj) return false
@@ -620,15 +644,8 @@ class PluginsLoader {
       const content = util.describeMsg(msg)
       const byPlugin = e.logPlugin ? ` · 由 ${logger.green.bold(e.logPlugin)}` : ''
       const cost = Date.now() - sendStart
-      const failed = Boolean(res?.error)
-      const failReason = failed
-        ? util.truncate(
-            res.error?.[0]?.message ??
-              res.error?.[0]?.code ??
-              (typeof res.error?.[0] === 'string' ? res.error[0] : util.String(res.error?.[0] ?? res.error)),
-            120,
-          )
-        : ''
+      const failed = hasSendError(res)
+      const failReason = failed ? util.truncate(describeSendError(res), 120) : ''
       util.makeLog(
         failed ? 'error' : 'info',
         `发 ${failed ? '✖' : '▶'} ${target} · ${logger.yellow(content)}${byPlugin} · ${util.colorCost(cost)}${

@@ -461,7 +461,9 @@ class Util {
 
   async exec(cmd: string | string[], opts: any = {}) {
     const { promise, resolve } = Promise.withResolvers<any>()
-    const name = logger.cyan(this.String(cmd))
+    const raw = this.String(cmd)
+    /** 命令可能很长（如 base64 编码的脚本），日志里截断显示 */
+    const name = logger.cyan(raw.length > 160 ? `${raw.slice(0, 160)}…（共 ${raw.length} 字）` : raw)
     this.makeLog(opts.quiet ? 'debug' : 'mark', name, 'Command')
     opts.encoding ??= 'buffer'
     const start_time = Date.now()

@@ -29,7 +29,8 @@ function makeContact(type, id) {
       SENT.push(record)
       /** 内容由内核的「发 ▶」日志统一输出，这里仅在 debug 下补充原始结构 */
       logger.debug(`[Mock] ${type}:${id} · ${Bot.describeMsg ? Bot.describeMsg(msg) : typeof msg}`)
-      return { message_id: `mock-${Date.now()}-${SENT.length}`, ...record }
+      /** 与云崽生态适配器一致：成功时 error 为空数组（内核不应据此判定失败） */
+      return { message_id: `mock-${Date.now()}-${SENT.length}`, error: [], ...record }
     },
     recallMsg(message_id) {
       RECALL.push({ type, id, message_id, at: Date.now() })
