@@ -182,7 +182,22 @@ export default class Update extends JiuLiPlugin {
       const log = await this.getLog(plugin)
       if (log) await this.reply(log)
     }
+    /** 内核是编译产物（lib/core 不入库），框架拉取后必须重新编译，否则跑的还是旧内核 */
+    if (!plugin && this.isUp) await this.build()
     Bot.makeLog('mark', `${this.e?.logFnc || ''} 最后更新时间：${time}`, 'Update')
+    return true
+  }
+
+  /** 重新编译内核（仅框架本体更新后需要） */
+  async build() {
+    const ret = await this.exec('pnpm build', '')
+    if (ret.error) {
+      await this.reply(
+        `内核编译失败，请手动执行 ${logger.red('pnpm build')}\n${Bot.String(ret.stderr || ret.error)}`,
+      )
+      return false
+    }
+    Bot.makeLog('mark', '内核已重新编译', 'Update')
     return true
   }
 
