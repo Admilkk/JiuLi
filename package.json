@@ -34,11 +34,12 @@
     "test": "node test/smoke.mjs",
     "test:hot": "node test/hotreload.mjs",
     "test:restart": "node test/supervisor-check.mjs",
-    "test:all": "node test/smoke.mjs && node test/daemon-stop.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs && node test/update-check.mjs && node test/ported-plugins.mjs",
+    "test:all": "node test/smoke.mjs && node test/daemon-stop.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs && node test/update-check.mjs && node test/cli-session.mjs && node test/ported-plugins.mjs",
     "test:ported": "node test/ported-plugins.mjs",
     "test:update": "node test/update-check.mjs",
     "test:load": "node test/load-check.mjs",
-    "test:daemon": "node test/daemon-stop.mjs"
+    "test:daemon": "node test/daemon-stop.mjs",
+    "test:cli": "node test/cli-session.mjs"
   },
   "imports": {
     "#miao": "./plugins/miao-plugin/components/index.js",

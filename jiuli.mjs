@@ -59,6 +59,85 @@ function pm2(args) {
   return spawnCmd(bin, args, { stdio: 'inherit', cwd: CWD })
 }
 
+/* ==================== tmux / screen 会话 ==================== */
+
+/** 会话名（可用 JIULI_SESSION 覆盖） */
+const SESSION = process.env.JIULI_SESSION || 'jiuli'
+
+function hasCmd(cmd) {
+  const ret = spawnSync(isWin ? 'where' : 'command', isWin ? [cmd] : ['-v', cmd], {
+    stdio: 'ignore',
+    shell: !isWin,
+  })
+  return ret.status === 0
+}
+
+/** 服务器上没装复用终端工具时的安装提示 */
+function installHint() {
+  const tip = { darwin: 'brew install tmux', win32: '（Windows 请在 WSL 或用服务器）' }
+  return (
+    tip[process.platform] ||
+    'apt install tmux   # Debian/Ubuntu\n              yum install tmux   # CentOS/RHEL\n              apk add tmux       # Alpine'
+  )
+}
+
+/** 进入 tmux 会话跑起来：已存在则接管，不存在则新建并启动 */
+function cmdSession(args = []) {
+  const appArgs = args.filter(a => !a.startsWith('-'))
+
+  /** 已经身处 tmux 里就不用再套一层，直接跑 */
+  if (process.env.TMUX) {
+    info('已在 tmux 会话内，直接启动 …')
+    return run(process.execPath, [path.join(CWD, 'app.js'), ...appArgs])
+  }
+
+  if (hasCmd('tmux')) {
+    /** 用登录 shell 起，nvm / nodenv 装的 node 也能找到；退出后留一个 shell 便于翻日志、就地重启 */
+    const shell =
+      process.env.SHELL && fs.existsSync(process.env.SHELL) ? process.env.SHELL : '/bin/sh'
+    const loginFlag = /\/(ba|z)sh$/.test(shell) ? '-lc' : '-c'
+    const inner = `${shell} ${loginFlag} '"${process.execPath}" "${path.join(CWD, 'app.js')}" ${appArgs.join(' ')}; exec "${shell}"'`
+    info(`进入 tmux 会话 ${SESSION}（不存在则新建）…`)
+    const ret = run('tmux', ['new-session', '-A', '-s', SESSION, '-c', CWD, inner])
+    if (ret.status === 0) {
+      console.log()
+      info(`脱离会话：Ctrl+B 然后按 D（进程继续跑）`)
+      info(`重新接上：node jiuli attach        （历史输出：Ctrl+B 然后按 [）`)
+      info(`会话列表：tmux ls                  结束会话：tmux kill-session -t ${SESSION}`)
+    }
+    return ret
+  }
+
+  if (hasCmd('screen')) {
+    info(`进入 screen 会话 ${SESSION}（不存在则新建）…`)
+    const ret = run('screen', ['-D', '-R', SESSION, process.execPath, path.join(CWD, 'app.js'), ...appArgs])
+    if (ret.status === 0) info(`脱离：Ctrl+A 然后按 D · 重新接上：node jiuli attach`)
+    return ret
+  }
+
+  warn('没找到 tmux / screen，无法提供「可重连的常驻会话」')
+  console.log(`
+  三个选择：
+    1) 装一个（推荐 tmux）：${installHint()}
+    2) 前台直接跑：node .（能看到日志也能敲指令，但 SSH 断开就结束）
+    3) 纯后台常驻：node jiuli s，日志用 node jiuli l -f 看（没有终端交互，重启请在 QQ 里发 #重启）
+`)
+  return { status: 1 }
+}
+
+/** 接回已有会话 */
+function cmdAttach() {
+  if (process.env.TMUX) return info('已在 tmux 会话内')
+  if (hasCmd('tmux')) {
+    const has = spawnCmd('tmux', ['has-session', '-t', SESSION], { stdio: 'ignore' })
+    if (has.status !== 0) fail(`没有名为 ${SESSION} 的会话，先执行：node jiuli m`)
+    info(`接上会话 ${SESSION} …`)
+    return run('tmux', ['attach', '-t', SESSION])
+  }
+  if (hasCmd('screen')) return run('screen', ['-D', '-R', SESSION])
+  fail('没找到 tmux / screen，无法接回会话')
+}
+
 /** 依赖检查 */
 function ensureDeps({ auto = true } = {}) {
   if (fs.existsSync(path.join(CWD, 'node_modules', 'typescript'))) return true
@@ -312,6 +391,8 @@ function cmdHelp() {
   init            i             安装依赖 + 编译内核 + 生成配置
   start           s             pm2 后台启动（自动检查依赖/构建/配置）
   start --fg      f             前台启动（Ctrl+C 退出）
+  session         m             在 tmux 会话里启动，可随时脱离/接回（服务器推荐）
+  attach          at            接回 tmux/screen 会话（实时日志 + 可输入指令）
   stop            x             停止
   restart         r / rs        重启
   log [条数]       l             查看日志（-f 持续输出）
@@ -325,7 +406,13 @@ function cmdHelp() {
   flush                         清空 pm2 日志文件
   help            h / ?         本说明
 
-  等价 npm scripts：pnpm setup / pnpm start / pnpm stop / pnpm rs / pnpm log / pnpm build / pnpm test`)
+  等价 npm scripts：pnpm setup / pnpm start / pnpm stop / pnpm rs / pnpm log / pnpm build / pnpm test
+
+  服务器上想「进程常驻 + 看实时日志 + 能敲 #重启」，用：
+    node jiuli m         启动进 tmux（首次新建，之后接管已有会话）
+    Ctrl+B 再按 D        脱离，进程继续跑（SSH 断了也不受影响）
+    node jiuli attach    重新接上：日志与终端输入都还在
+  会话名默认 jiuli，可用 JIULI_SESSION 覆盖。`)
 }
 
 const [cmd = 'help', ...args] = process.argv.slice(2)
@@ -350,6 +437,12 @@ const commands = {
   run: () => cmdStart(args),
   f: () => cmdStart(['--fg']),
   fg: () => cmdStart(['--fg']),
+  // 可重连的常驻会话（tmux / screen）
+  session: () => cmdSession(args),
+  tmux: () => cmdSession(args),
+  m: () => cmdSession(args),
+  attach: cmdAttach,
+  at: cmdAttach,
   stop: cmdStop,
   x: cmdStop,
   kill: cmdStop,

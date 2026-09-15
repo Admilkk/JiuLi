@@ -35,6 +35,8 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 | `list` | `ls` | 列出插件目录 |
 | `create <名称>` | `c` | 生成插件骨架（`--dsl` / `--dir`） |
 | `add <git地址>` | `a` | 安装第三方插件（`--name 目录名` 指定目录名） |
+| `session` | `m` | 在 tmux 会话里启动（可脱离/接回，服务器推荐） |
+| `attach` | `at` | 接回 tmux/screen 会话（实时日志 + 可输入指令） |
 | `build` | `b` | 编译内核 |
 | `test` | `t` | 跑测试（`--hot` / `--restart`） |
 
@@ -91,6 +93,19 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 卸载插件时会清理它注册的 express 路由与 WebSocket 路径，自带 Web 服务的插件反复重载不会出现路由重复或端口占用。
 
 `#重载` 只用于自动机制覆盖不到的情况：`#重载` 补漏加载磁盘上还没加载的插件，`#重载 关键词` 强制刷新匹配的插件。
+
+## 服务器上常驻运行
+
+想在服务器上同时保住「进程常驻」「实时日志」「终端敲 `#重启`」，用一条命令进 tmux 会话：
+
+```bash
+node jiuli m           # 进入 tmux 会话 jiuli：不存在则新建，已存在则接管
+# Ctrl+B 再按 D        # 脱离：进程继续跑，SSH 断开也不受影响
+node jiuli attach      # 重新连上：实时日志与终端输入都还在（历史输出 Ctrl+B 再按 [）
+```
+
+会话名默认 `jiuli`，可用环境变量 `JIULI_SESSION` 覆盖。没装 tmux 会自动尝试 screen；
+两者都没有则打印三种选择（装 tmux / 前台 `node .` / 后台 `pnpm start`），不会硬启动。
 
 ## 更新
 
