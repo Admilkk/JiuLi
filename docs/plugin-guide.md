@@ -24,6 +24,19 @@ pnpm jiuli create my-plugin --dsl    # 函数式 DSL
 
 ---
 
+## 零之二、两套体系并存（双端适配）
+
+| | 旧体系（云崽） | JiuLi 原生体系 |
+|---|---|---|
+| 写法 | `export class X extends plugin` | `export class X extends JiuLiPlugin` / `definePlugin({...})` |
+| 导入 | 全局 `plugin` / `../../lib/plugins/plugin.js` | `import { JiuLiPlugin, command } from 'jiuli'` |
+| 能力 | `rule` / `task` / `handler` / `accept` / `init()` | 上者全部 + **分发前后钩子** + **onLoad/onUnload** + **useConfig** |
+| 生命周期 | `init()` | `init()` 或 `onLoad()`（基类把 init 转发给 onLoad） |
+
+两种写法加载进同一套注册表与分发流程，互不影响：旧插件不用改一个字，新插件可以用上新增能力。
+
+---
+
 ## 一、目录结构
 
 ```
@@ -304,6 +317,74 @@ export default class Demo extends JiuLiPlugin {
 或使用与云崽一致的 Map 持久化：`Bot.getMap('data/demo')`。
 
 ---
+
+## 六之二、分发钩子（JiuLi 原生扩展）
+
+旧体系没有的能力：在**分发前**统一拦截、在**分发后**统一收尾。钩子会在所有候选插件上按优先级依次执行。
+
+```js
+import { definePlugin, command, beforeMessage, afterMessage } from 'jiuli'
+
+export default definePlugin({
+  name: '审计',
+  apps: [
+    // 分发前：可做黑白名单、限流、审计；返回 false 直接拦截本次分发
+    beforeMessage(async e => {
+      if (e.msg === '#禁止') {
+        await e.reply('这条指令被拦截了')
+        return false            // 拦截：后续插件、规则都不会执行
+      }
+    }),
+    // 分发后：无论是否命中插件都会执行（统计、清理、审计日志）
+    afterMessage(e => {
+      logger.mark(`[审计] ${e.user_id} 发了 ${e.msg}`)
+    }),
+    command(/^#正常$/, async e => e.reply('ok')),
+  ],
+})
+```
+
+类形态写法（方法与选项同名即可）：
+
+```js
+import { JiuLiPlugin } from 'jiuli'
+
+export default class Audit extends JiuLiPlugin {
+  constructor() {
+    super({
+      name: '审计',
+      event: 'message',
+      hooks: { beforeMessage: 'onBefore', afterMessage: 'onAfter' },
+    })
+  }
+  async onBefore(e) { /* 返回 false 可拦截 */ }
+  async onAfter(e) { /* 收尾 */ }
+  async onLoad() { logger.mark('插件加载完成') }
+  async onUnload() { clearInterval(this.timer) }   // 热重载/卸载时清理资源
+}
+```
+
+> 钩子必须**显式声明**（DSL 的 `beforeMessage(...)` 或类形态的 `hooks: {...}`），
+> 不会因为插件里恰好有同名方法就被当成钩子调用。
+
+## 六之三、生命周期与配置
+
+```js
+export default class Demo extends JiuLiPlugin {
+  async onLoad() {
+    // 加载完成：建目录、起定时器、预热缓存（旧插件继续用 init()）
+  }
+  async onUnload() {
+    // 卸载/热重载前：清理定时器、关闭连接（避免热重载后资源重复）
+  }
+  async init() {
+    // 插件配置：首次调用用默认值生成 config/<插件名>.yaml
+    const { config, configSave } = await this.useConfig({ enable: true, tips: '你好' })
+    config.tips = '新值'
+    await configSave()
+  }
+}
+```
 
 ## 七、跨插件调用
 

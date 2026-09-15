@@ -119,8 +119,21 @@ export interface CommandOptions {
 }
 
 export interface AppDescriptor {
-  __type: 'command' | 'task' | 'accept' | 'handler'
+  __type: 'command' | 'task' | 'accept' | 'handler' | 'hook'
   [key: string]: any
+}
+
+/**
+ * 分发前钩子（中间件）：所有候选插件按优先级依次执行；返回 false 可拦截本次分发
+ * 旧插件体系没有这个能力，属于 JiuLi 原生扩展
+ */
+export function beforeMessage(fnc: (e: JiuLiEvent) => any, options: { priority?: number } = {}): AppDescriptor {
+  return { __type: 'hook', stage: 'beforeMessage', fnc, ...options }
+}
+
+/** 分发后钩子：无论是否命中插件都会执行（可用于统计、清理、审计日志） */
+export function afterMessage(fnc: (e: JiuLiEvent) => any, options: { priority?: number } = {}): AppDescriptor {
+  return { __type: 'hook', stage: 'afterMessage', fnc, ...options }
 }
 
 /**
@@ -196,6 +209,7 @@ export function definePlugin(options: DefinePluginOptions) {
   const tasks = apps.filter(a => a.__type === 'task')
   const accepts = apps.filter(a => a.__type === 'accept')
   const handlers = apps.filter(a => a.__type === 'handler')
+  const hooks = apps.filter(a => a.__type === 'hook')
   const pluginEvent =
     options.event ??
     accepts[0]?.event ??
@@ -235,6 +249,9 @@ export function definePlugin(options: DefinePluginOptions) {
         this.accept = named((ev: JiuLiEvent) => accepts[0].fnc.call(this, ev), `${name}:accept`)
       }
 
+      /** 钩子：绑定为同名方法，内核分发前后自动调用 */
+      for (const h of hooks) (this as any)[h.stage] = h.fnc.bind(this)
+
       if (handlers.length) {
         this.handler = handlers.map(h => ({
           key: h.key,
@@ -251,4 +268,16 @@ export function definePlugin(options: DefinePluginOptions) {
 }
 
 /** 兼容别名：definePlugin 返回的类也可直接当 plugin 用 */
-export default { JiuLiPlugin, definePlugin, command, task, accept, handler, getBot, cfg, logger, segment: undefined as any }
+export default {
+  JiuLiPlugin,
+  definePlugin,
+  command,
+  task,
+  accept,
+  handler,
+  beforeMessage,
+  afterMessage,
+  getBot,
+  cfg,
+  logger,
+}

@@ -117,4 +117,4 @@ export default class Restart extends JiuLiPlugin {
   }
 }
 
-export { Start }
+export { Start, Restart }

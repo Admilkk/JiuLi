@@ -42,5 +42,10 @@ plugins/_test-fixtures/
 test/.commit-msg
 
 # 测试/调试临时产物
-test/.tmp-*/
+test/.tmp-*
 test/tmp-*.mjs
+
+# 测试用隔离插件目录
+.tmp-plugins/
+test/.restart-result
+test/.supervisor-result

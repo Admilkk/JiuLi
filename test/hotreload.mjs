@@ -6,10 +6,41 @@
  */
 import fs from 'node:fs'
 
+
 /** 测试用隔离配置目录：绝不碰真实的 config/config */
 process.env.JIULI_CONFIG_DIR = 'test/.tmp-config/'
 
 import path from 'node:path'
+
+/**
+ * 测试用隔离插件目录（只放内置/示例 + 夹具，避免生态插件抢指令，也让测试快很多）
+ * 注意：必须位于项目根目录下一级，旧插件的 "../../lib/..." 相对路径才成立
+ */
+const PLUGINS_DIR = '.tmp-plugins'
+process.env.JIULI_PLUGINS_DIR = PLUGINS_DIR
+fs.rmSync(PLUGINS_DIR, { recursive: true, force: true })
+fs.mkdirSync(PLUGINS_DIR, { recursive: true })
+/** 复制目录但跳过 node_modules / 符号链接（plugins/example/node_modules/jiuli 指向项目根，直接复制会递归） */
+const copyTree = (from, to) => {
+  fs.mkdirSync(to, { recursive: true })
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === '.git' || entry.isSymbolicLink()) continue
+    const src = path.join(from, entry.name)
+    const dest = path.join(to, entry.name)
+    if (entry.isDirectory()) copyTree(src, dest)
+    else fs.copyFileSync(src, dest)
+  }
+}
+for (const dir of ['system', 'adapter', 'demo', 'example']) {
+  const from = path.join('plugins', dir)
+  if (!fs.existsSync(from)) continue
+  copyTree(from, path.join(PLUGINS_DIR, dir))
+}
+/** 让隔离目录里的插件也能 import 'jiuli'（指向项目根的链接） */
+fs.mkdirSync(path.join(PLUGINS_DIR, 'node_modules'), { recursive: true })
+try {
+  fs.symlinkSync(path.resolve('.'), path.join(PLUGINS_DIR, 'node_modules', 'jiuli'), 'junction')
+} catch {}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -20,8 +51,8 @@ fs.writeFileSync('test/.tmp-config/other.yaml', 'master:\n  - "mock:10001"\nauto
 fs.writeFileSync('test/.tmp-config/server.yaml', 'url: http://localhost:25370\nport: 25370\nredirect: https://x\nauth:\n')
 fs.writeFileSync('test/.tmp-config/group.yaml', 'default:\n  groupCD: 0\n  singleCD: 0\n  onlyReplyAt: 0\n')
 
-const FILE = 'plugins/example/hot-reload-test.js'
-const DIR = 'plugins/hotreload-newdir'
+const FILE = '.tmp-plugins/example/hot-reload-test.js'
+const DIR = path.join(PLUGINS_DIR, 'hotreload-newdir')
 const pluginSource = version => `import { JiuLiPlugin } from 'jiuli'
 
 export default class HotReloadTest extends JiuLiPlugin {
@@ -121,7 +152,7 @@ check('卸载后不再响应（无匹配插件）', !json().includes('热重载�
 
 /** 6. 重载时清理插件注册的 express 路由（避免重复注册） */
 {
-  const dir = 'plugins/hotreload-route'
+  const dir = path.join(PLUGINS_DIR, 'hotreload-route')
   fs.rmSync(dir, { recursive: true, force: true })
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(
@@ -168,4 +199,5 @@ fs.rmSync(DIR, { recursive: true, force: true })
 const pass = results.filter(r => r.ok).length
 console.log(`\n=== 热重载测试：${pass}/${results.length} 通过 ===`)
 try { fs.rmSync('test/.tmp-config', { recursive: true, force: true }) } catch {}
+try { fs.rmSync(PLUGINS_DIR, { recursive: true, force: true }) } catch {}
 process.exit(pass === results.length ? 0 : 1)

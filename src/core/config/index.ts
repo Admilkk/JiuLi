@@ -46,6 +46,10 @@ class Cfg {
   config: Record<string, any> = {}
   watcher: Record<string, any> = {}
   _package?: Record<string, any>
+  /** getAllCfg 合并结果缓存（config/<name>.yaml 变更时失效） */
+  mergedCache = new Map<string, any>()
+  /** 群配置 4 层合并结果缓存（(bot_id,group_id) → 配置） */
+  groupCache = new Map<string, any>()
 
   /** 用户配置目录（可用 JIULI_CONFIG_DIR 覆盖，测试/多实例时避免污染真实配置） */
   get userDir(): string {
@@ -179,15 +183,20 @@ class Cfg {
     return this.getAllCfg('jiuli').perf || {}
   }
 
-  /** 群配置（4 层合并） */
+  /** 群配置（4 层合并，结果缓存；群配置文件变更或群开关变动时失效） */
   getGroup(bot_id: string | number = '', group_id: string | number = ''): Record<string, any> {
+    const key = `${bot_id}:${group_id}`
+    const cached = this.groupCache.get(key)
+    if (cached) return cached
     const config = this.getAllCfg('group')
-    return {
+    const merged = {
       ...config.default,
       ...config[`${bot_id}:default`],
       ...config[group_id],
       ...config[`${bot_id}:${group_id}`],
     }
+    this.groupCache.set(key, merged)
+    return merged
   }
 
   /** other 配置 */
@@ -205,12 +214,25 @@ class Cfg {
     return this.getYaml('config', name)
   }
 
-  /** 默认 + 用户配置合并 */
+  /**
+   * 默认 + 用户配置合并
+   * 结果做缓存（消息分发热路径上会被频繁读取），配置文件变更时自动失效
+   */
   getAllCfg(name: string): Record<string, any> {
-    return {
+    const cached = this.mergedCache.get(name)
+    if (cached) return cached
+    const merged = {
       ...this.getdefSet(name),
       ...this.getConfig(name),
     }
+    this.mergedCache.set(name, merged)
+    return merged
+  }
+
+  /** 让某个配置的缓存失效（供文件变更时调用） */
+  invalidate(name: string) {
+    this.mergedCache.delete(name)
+    this.groupCache.clear()
   }
 
   /** 读取 yaml */
@@ -252,6 +274,7 @@ class Cfg {
       clearTimeout(timer)
       timer = setTimeout(() => {
         delete this.config[key]
+        this.invalidate(name)
         // package.json 相关内容可能随配置变化
         if (name === 'jiuli') this._package = undefined
         if (typeof (globalThis as any).Bot !== 'object') return

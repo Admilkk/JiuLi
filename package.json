@@ -34,7 +34,9 @@
     "test": "node test/smoke.mjs",
     "test:hot": "node test/hotreload.mjs",
     "test:restart": "node test/supervisor-check.mjs",
-    "test:all": "node test/smoke.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs"
+    "test:all": "node test/smoke.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs && node test/ported-plugins.mjs",
+    "test:ported": "node test/ported-plugins.mjs",
+    "test:load": "node test/load-check.mjs"
   },
   "imports": {
     "#miao": "./plugins/miao-plugin/components/index.js",

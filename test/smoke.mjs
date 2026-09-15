@@ -13,13 +13,43 @@ process.env.JIULI_CONFIG_DIR = 'test/.tmp-config/'
 
 import path from 'node:path'
 
+/**
+ * 测试用隔离插件目录（只放内置/示例 + 夹具，避免生态插件抢指令，也让测试快很多）
+ * 注意：必须位于项目根目录下一级，旧插件的 "../../lib/..." 相对路径才成立
+ */
+const PLUGINS_DIR = '.tmp-plugins'
+process.env.JIULI_PLUGINS_DIR = PLUGINS_DIR
+fs.rmSync(PLUGINS_DIR, { recursive: true, force: true })
+fs.mkdirSync(PLUGINS_DIR, { recursive: true })
+/** 复制目录但跳过 node_modules / 符号链接（plugins/example/node_modules/jiuli 指向项目根，直接复制会递归） */
+const copyTree = (from, to) => {
+  fs.mkdirSync(to, { recursive: true })
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === '.git' || entry.isSymbolicLink()) continue
+    const src = path.join(from, entry.name)
+    const dest = path.join(to, entry.name)
+    if (entry.isDirectory()) copyTree(src, dest)
+    else fs.copyFileSync(src, dest)
+  }
+}
+for (const dir of ['system', 'adapter', 'demo', 'example']) {
+  const from = path.join('plugins', dir)
+  if (!fs.existsSync(from)) continue
+  copyTree(from, path.join(PLUGINS_DIR, dir))
+}
+/** 让隔离目录里的插件也能 import 'jiuli'（指向项目根的链接） */
+fs.mkdirSync(path.join(PLUGINS_DIR, 'node_modules'), { recursive: true })
+try {
+  fs.symlinkSync(path.resolve('.'), path.join(PLUGINS_DIR, 'node_modules', 'jiuli'), 'junction')
+} catch {}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 /**
  * 旧插件夹具：从 test/fixtures/ 复制到 plugins/_test-fixtures/（临时目录，测试结束删除）
  * 复制是必须的 —— 旧插件用相对路径 import 框架（../../lib/...），只有放在 plugins/<目录>/ 下才成立
  */
-const FIXTURE_DIR = 'plugins/_test-fixtures'
+const FIXTURE_DIR = path.join(PLUGINS_DIR, '_test-fixtures')
 fs.rmSync(FIXTURE_DIR, { recursive: true, force: true })
 fs.mkdirSync(FIXTURE_DIR, { recursive: true })
 let fixtureCount = 0
@@ -28,6 +58,32 @@ for (const file of fs.readdirSync('test/fixtures')) {
   fs.copyFileSync(path.join('test/fixtures', file), path.join(FIXTURE_DIR, file))
   fixtureCount++
 }
+/** 原生钩子测试插件（beforeMessage 拦截 / afterMessage 统计） */
+fs.writeFileSync(
+  path.join(FIXTURE_DIR, 'hook-test.js'),
+  `import { JiuLiPlugin } from 'jiuli'
+const state = { before: 0, after: 0 }
+globalThis.__hookState = state
+export class HookBefore extends JiuLiPlugin {
+  constructor() {
+    super({ name: '钩子测试', dsc: 'test', event: 'message', priority: -Infinity })
+  }
+  async beforeMessage(e) {
+    state.before++
+    if (e.msg === '#钩子拦截') return false
+  }
+}
+export class HookAfter extends JiuLiPlugin {
+  constructor() {
+    super({ name: '钩子测试2', dsc: 'test', event: 'message', priority: -Infinity })
+  }
+  async afterMessage() {
+    state.after++
+  }
+}
+`,
+)
+
 /** 模拟"插件内部自己判断主人、非主人静默 return false"的第三方插件写法 */
 fs.writeFileSync(
   path.join(FIXTURE_DIR, 'silent-deny.js'),
@@ -42,6 +98,7 @@ fs.writeFileSync(
 }
 `,
 )
+
 
 /** 测试配置（config/config 为运行时目录，已 gitignore） */
 fs.mkdirSync('test/.tmp-config', { recursive: true })
@@ -278,6 +335,22 @@ emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#渲染�
 await sleep(600)
 check('渲染：后端状态（#渲染状态）', json().includes('渲染后端'))
 
+/* ---------- 11b. 原生钩子 beforeMessage / afterMessage ---------- */
+{
+  const st = globalThis.__hookState || { before: 0, after: 0 }
+  st.before = 0
+  st.after = 0
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '喵一个' })
+  await sleep(500)
+  check('原生钩子被调用（before/after）', st.before > 0 && st.after > 0, `before=${st.before} after=${st.after}`)
+
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#钩子拦截' })
+  await sleep(500)
+  check('beforeMessage 返回 false 可拦截分发', json() === '[]', json().slice(0, 40))
+}
+
 /* ---------- 12b. 权限与"无响应"提示 ---------- */
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#诊断' })
@@ -346,4 +419,5 @@ try {
   fs.rmSync(FIXTURE_DIR, { recursive: true, force: true })
 } catch {}
 try { fs.rmSync('test/.tmp-config', { recursive: true, force: true }) } catch {}
+try { fs.rmSync(PLUGINS_DIR, { recursive: true, force: true }) } catch {}
 process.exit(pass === results.length ? 0 : 1)

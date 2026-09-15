@@ -56,6 +56,30 @@ export default class plugin {
   }
 
   /**
+   * 生命周期：插件加载时调用（返回 "return" 可跳过加载）
+   * - 旧插件：覆盖 init()
+   * - 原生插件：覆盖 onLoad()（本方法会转发过来）
+   */
+  async init(): Promise<any> {
+    if (typeof (this as any).onLoad === 'function') return (this as any).onLoad()
+    return undefined
+  }
+
+  /**
+   * 插件配置：首次调用用 defaults 生成 config/<插件名>.yaml 并返回
+   * @returns {Promise<{ config: any; configSave: () => Promise<any>; configFile: string }>}
+   */
+  async useConfig(defaults: Record<string, any> = {}, opts: any = {}) {
+    const name = opts.name || (this as any).__key || this.name
+    if (!this._configPromise) {
+      const { default: makeConfig } = await import('./plugin-config.js')
+      this._configPromise = makeConfig(name, defaults, opts.keep || {}, { watch: true, ...opts })
+    }
+    return this._configPromise
+  }
+  _configPromise?: Promise<any>
+
+  /**
    * 回复消息
    * @param msg 发送的消息
    * @param quote 是否引用回复

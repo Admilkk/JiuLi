@@ -76,3 +76,6 @@ export default class Update extends JiuLiPlugin {
     return this.reply(`最近更新：\n${ret.stdout}`)
   }
 }
+
+/** 兼容旧插件的具名导入：import { update } from '../../system/update.js' */
+export { Update as update }

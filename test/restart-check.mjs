@@ -7,6 +7,37 @@
  * 用法：node test/restart-check.mjs（期望脚本自身以 255 结束）
  */
 import fs from 'node:fs'
+import path from 'node:path'
+
+/**
+ * 测试用隔离插件目录（只放内置/示例 + 夹具，避免生态插件抢指令，也让测试快很多）
+ * 注意：必须位于项目根目录下一级，旧插件的 "../../lib/..." 相对路径才成立
+ */
+const PLUGINS_DIR = '.tmp-plugins'
+process.env.JIULI_PLUGINS_DIR = PLUGINS_DIR
+fs.rmSync(PLUGINS_DIR, { recursive: true, force: true })
+fs.mkdirSync(PLUGINS_DIR, { recursive: true })
+/** 复制目录但跳过 node_modules / 符号链接（plugins/example/node_modules/jiuli 指向项目根，直接复制会递归） */
+const copyTree = (from, to) => {
+  fs.mkdirSync(to, { recursive: true })
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === '.git' || entry.isSymbolicLink()) continue
+    const src = path.join(from, entry.name)
+    const dest = path.join(to, entry.name)
+    if (entry.isDirectory()) copyTree(src, dest)
+    else fs.copyFileSync(src, dest)
+  }
+}
+for (const dir of ['system', 'adapter', 'demo', 'example']) {
+  const from = path.join('plugins', dir)
+  if (!fs.existsSync(from)) continue
+  copyTree(from, path.join(PLUGINS_DIR, dir))
+}
+/** 让隔离目录里的插件也能 import 'jiuli'（指向项目根的链接） */
+fs.mkdirSync(path.join(PLUGINS_DIR, 'node_modules'), { recursive: true })
+try {
+  fs.symlinkSync(path.resolve('.'), path.join(PLUGINS_DIR, 'node_modules', 'jiuli'), 'junction')
+} catch {}
 
 /** 测试用隔离配置目录：绝不碰真实的 config/config */
 process.env.JIULI_CONFIG_DIR = 'test/.tmp-config/'

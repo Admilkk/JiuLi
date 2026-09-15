@@ -74,12 +74,15 @@ class PluginsLoader {
 
   handler: Record<string, any> = {}
   task: any[] = []
-  dir = 'plugins'
+  /** 插件目录（JIULI_PLUGINS_DIR 可指定，测试/多实例时隔离） */
+  dir = process.env.JIULI_PLUGINS_DIR || 'plugins'
 
   /** 事件索引：post_type → 插件条目 */
   eventIndex = new Map<string, PluginEntry[]>()
   /** 没有插件类的文件（适配器 / 纯胶水文件）：#重载 时跳过，避免重复副作用 */
   inertFiles = new Set<string>()
+  /** 每个插件的 init 实例（用于卸载时回调 onUnload） */
+  private initInstances = new Map<string, any>()
   /** 命令冷却cd */
   groupCD: Record<string, boolean> = {}
   singleCD: Record<string, boolean> = {}
@@ -255,6 +258,8 @@ class PluginsLoader {
     const init = new p()
     /** 插件目录名（渲染/数据目录定位用） */
     init.__key = String(file.name).split('/')[0]
+    /** 生命周期：原生插件可覆盖 onLoad()（旧插件继续用 init()） */
+    this.initInstances.set(file.name, init)
     util.makeLog('debug', `加载插件 [${file.name}][${init.name}]`, 'Plugin')
     /** 执行初始化，返回 return 则跳过加载 */
     if (init.init && (await init.init()) === 'return') return
@@ -336,10 +341,11 @@ class PluginsLoader {
     /** 注册 runtime（轻量挂载，重活懒加载） */
     if (cfg.getCompat().runtime !== false) Runtime.attach(e)
 
-    /** 收到消息（谁、在哪、说了什么） */
+    /** 收到消息（谁、在哪、说了什么）：日志关闭或等级不够时不做任何字符串拼接 */
     const scene = util.describeScene(e)
     const msgLength = Number(cfg.bot.log_msg_length ?? 60)
-    if (cfg.bot.log_msg !== false && e.msg !== undefined)
+    const logMsg = cfg.bot.log_msg !== false && util.isLogLevelEnabled('info')
+    if (logMsg && e.msg !== undefined)
       util.makeLog(
         'info',
         `收 ◀ ${util.describeScene(e, true)} · ${logger.yellow(
@@ -421,116 +427,147 @@ class PluginsLoader {
       e.msg = String(e.msg).replace(this.zzzReg, '#绝区零')
     }
 
-    /** 优先执行 accept */
-    for (const i of priority)
-      if (i.plugin.accept) {
-        const res = await getInstance(i).accept(e)
-        if (res === 'return') {
-          util.makeLog('info', `${i.name} <${i.key}> · accept 终止分发`, 'Plugin')
-          return
+    /** 原生插件钩子：分发前（任一返回 false 即拦截本次分发） */
+    if (!(await this.runHooks(e, priority, 'beforeMessage'))) return
+    try {
+      /** 优先执行 accept */
+      for (const i of priority)
+        if (i.plugin.accept) {
+          const res = await getInstance(i).accept(e)
+          if (res === 'return') {
+            util.makeLog('info', `${i.name} <${i.key}> · accept 终止分发`, 'Plugin')
+            return
+          }
+          if (res) {
+            util.makeLog('info', `${i.name} <${i.key}> · accept 命中`, 'Plugin')
+            break
+          }
         }
-        if (res) {
-          util.makeLog('info', `${i.name} <${i.key}> · accept 命中`, 'Plugin')
-          break
-        }
-      }
 
-    /** 记录"命中了指令规则但没有插件响应"的情况，用于最后给出提示 */
-    const commandMatched: string[] = []
-    for (const i of priority) {
-      if (!i.plugin.rule) continue
-      for (const v of i.plugin.rule) {
-        /** 判断事件 */
-        if (v.event && !this.filtEvent(e, v)) continue
+      /** 记录"命中了指令规则但没有插件响应"的情况，用于最后给出提示 */
+      const commandMatched: string[] = []
+      for (const i of priority) {
+        if (!i.plugin.rule) continue
+        for (const v of i.plugin.rule) {
+          /** 判断事件 */
+          if (v.event && !this.filtEvent(e, v)) continue
 
-        /** 正则匹配 */
-        const regStr = String(v.reg)
-        if (!(v.reg as RegExp).test(String(e.msg))) continue
+          /** 正则匹配 */
+          const regStr = String(v.reg)
+          if (!(v.reg as RegExp).test(String(e.msg))) continue
 
-        const instance = getInstance(i)
-        const fncName = typeof v.fnc === 'string' ? v.fnc : v.fnc.name || 'fnc'
-        e.logFnc = `${logger.blue(`[${i.name}(${fncName})]`)}`
-        util.markPlugin(e, i.name, i.key)
-        recentItem.matched = `${i.name} <${i.key}> → ${fncName}`
-        /** 指令型规则（不能匹配空串）才算"用户想执行指令" */
-        if (!(v.reg as RegExp).test('')) commandMatched.push(`${i.name}`)
+          const instance = getInstance(i)
+          const fncName = typeof v.fnc === 'string' ? v.fnc : v.fnc.name || 'fnc'
+          e.logFnc = `${logger.blue(`[${i.name}(${fncName})]`)}`
+          util.markPlugin(e, i.name, i.key)
+          recentItem.matched = `${i.name} <${i.key}> → ${fncName}`
+          /** 指令型规则（不能匹配空串）才算"用户想执行指令" */
+          if (!(v.reg as RegExp).test('')) commandMatched.push(`${i.name}`)
 
-        /** 命中日志：插件 / 来源文件 / 正则 / 执行方法 / 优先级 */
-        util.makeLog(
-          v.log === false ? 'debug' : 'info',
-          `中 ▶ ${logger.green.bold(i.name)} ${logger.gray(`<${i.key}>`)} · 规则 ${logger.gray(regStr)} · 方法 ${logger.cyan(
-            fncName,
-          )} · 优先级 ${i.priority}`,
-          'Plugin',
-        )
+          /** 命中日志：插件 / 来源文件 / 正则 / 执行方法 / 优先级 */
+          util.makeLog(
+            v.log === false ? 'debug' : 'info',
+            `中 ▶ ${logger.green.bold(i.name)} ${logger.gray(`<${i.key}>`)} · 规则 ${logger.gray(regStr)} · 方法 ${logger.cyan(
+              fncName,
+            )} · 优先级 ${i.priority}`,
+            'Plugin',
+          )
 
-        /** 判断权限 */
-        if (!this.filtPermission(e, v))
-          util.makeLog('info', `${i.name} · 权限不足（需要 ${v.permission}）`, 'Plugin')
-        else
-          try {
-            const startTime = Date.now()
-            /** 绑定到插件实例，保持与云崽一致的 this 语义 */
-            const fn =
-              typeof v.fnc === 'function' ? v.fnc.bind(instance) : instance[v.fnc]?.bind(instance)
-            const res = fn && (await fn(e, (v.reg as RegExp).exec(String(e.msg)) || undefined))
-            const cost = Date.now() - startTime
-            metrics.record(i, cost)
+          /** 判断权限 */
+          if (!this.filtPermission(e, v))
+            util.makeLog('info', `${i.name} · 权限不足（需要 ${v.permission}）`, 'Plugin')
+          else
+            try {
+              const startTime = Date.now()
+              /** 绑定到插件实例，保持与云崽一致的 this 语义 */
+              const fn =
+                typeof v.fnc === 'function' ? v.fnc.bind(instance) : instance[v.fnc]?.bind(instance)
+              const res = fn && (await fn(e, (v.reg as RegExp).exec(String(e.msg)) || undefined))
+              const cost = Date.now() - startTime
+              metrics.record(i, cost)
 
-            if (res === false) {
+              if (res === false) {
+                util.makeLog(
+                  v.log === false ? 'debug' : 'mark',
+                  `${logger.green.bold(i.name)} · 返回 false，继续匹配后续规则 · ${util.colorCost(cost)}`,
+                  'Plugin',
+                )
+                continue
+              }
+              const resText =
+                res === undefined || res === true
+                  ? ''
+                  : ` · 返回 ${typeof res === 'object' ? 'object' : util.truncate(res, 16)}`
               util.makeLog(
                 v.log === false ? 'debug' : 'mark',
-                `${logger.green.bold(i.name)} · 返回 false，继续匹配后续规则 · ${util.colorCost(cost)}`,
+                `完成 ${logger.green.bold(i.name)} · ${util.colorCost(cost)}${resText}`,
                 'Plugin',
               )
-              continue
+            } catch (err) {
+              util.makeLog('error', [`${i.name} <${i.key}> · 执行出错`, err], 'Plugin')
             }
-            const resText =
-              res === undefined || res === true
-                ? ''
-                : ` · 返回 ${typeof res === 'object' ? 'object' : util.truncate(res, 16)}`
-            util.makeLog(
-              v.log === false ? 'debug' : 'mark',
-              `完成 ${logger.green.bold(i.name)} · ${util.colorCost(cost)}${resText}`,
-              'Plugin',
-            )
-          } catch (err) {
-            util.makeLog('error', [`${i.name} <${i.key}> · 执行出错`, err], 'Plugin')
-          }
-        return
+          return
+        }
       }
-    }
 
-    util.makeLog('debug', `未命中插件 · ${scene} · ${util.truncate(e.msg || util.describeMsg(e.message))}`, 'Msg')
+      if (util.isLogLevelEnabled('debug'))
+        util.makeLog('debug', `未命中插件 · ${scene} · ${util.truncate(e.msg || util.describeMsg(e.message))}`, 'Msg')
 
-    /**
-     * 命中了"指令型规则"（正则不匹配空串）但没有任何插件响应时给出提示，
-     * 避免像"非主人使用主人指令 → 插件内部 return false"这样静默无响应，让人以为框架坏了
-     */
-    if (
-      commandMatched.length &&
-      !e.__replied &&
-      cfg.bot.no_handler_tip !== false &&
-      e.message &&
-      e.msg
-    ) {
-      const key = `${e.self_id}.${e.user_id}`
-      const now = Date.now()
-      if (!this.hintThrottle[key] || now - this.hintThrottle[key] > 10000) {
-        this.hintThrottle[key] = now
-        const tip = e.isMaster
-          ? `这条指令没有被执行（参数或触发条件不符）· 可发 #插件列表 查看可用指令`
-          : `这条指令没有响应 · 如果它是主人专属指令，请先发 #设置主人 绑定主人账号；也可能是参数不符`
-        util.makeLog('info', `提示无响应 · ${util.truncate(e.msg, 20)} · 命中 ${commandMatched.join('/')}`, 'Msg')
-        /** 提示由框架发出，避免日志里错误归属到最后一个匹配到的插件 */
-        e.logPlugin = 'JiuLi'
-        await e.reply?.(tip)
+      /**
+       * 命中了"指令型规则"（正则不匹配空串）但没有任何插件响应时给出提示，
+       * 避免像"非主人使用主人指令 → 插件内部 return false"这样静默无响应，让人以为框架坏了
+       */
+      if (
+        commandMatched.length &&
+        !e.__replied &&
+        cfg.bot.no_handler_tip !== false &&
+        e.message &&
+        e.msg
+      ) {
+        const key = `${e.self_id}.${e.user_id}`
+        const now = Date.now()
+        if (!this.hintThrottle[key] || now - this.hintThrottle[key] > 10000) {
+          this.hintThrottle[key] = now
+          const tip = e.isMaster
+            ? `这条指令没有被执行（参数或触发条件不符）· 可发 #插件列表 查看可用指令`
+            : `这条指令没有响应 · 如果它是主人专属指令，请先发 #设置主人 绑定主人账号；也可能是参数不符`
+          util.makeLog('info', `提示无响应 · ${util.truncate(e.msg, 20)} · 命中 ${commandMatched.join('/')}`, 'Msg')
+          /** 提示由框架发出，避免日志里错误归属到最后一个匹配到的插件 */
+          e.logPlugin = 'JiuLi'
+          await e.reply?.(tip)
+        }
       }
+  
+    } finally {
+      /** 原生插件钩子：分发后（无论是否命中都会执行） */
+      await this.runHooks(e, priority, 'afterMessage')
     }
   }
 
   /** "无响应提示"节流（同一用户 10 秒内只提示一次） */
   private hintThrottle: Record<string, number> = {}
+
+  /**
+   * 执行原生插件钩子（beforeMessage / afterMessage）
+   * 类形态：定义同名方法即可；DSL 形态：beforeMessage(fn) / afterMessage(fn) 会绑定为同名方法
+   * beforeMessage 返回 false 表示拦截本次分发
+   */
+  private async runHooks(e: JiuLiEvent, entries: PluginEntry[], name: 'beforeMessage' | 'afterMessage') {
+    for (const entry of entries) {
+      const fn = entry.plugin?.[name]
+      if (typeof fn !== 'function') continue
+      try {
+        const ret = await fn.call(Object.assign(Object.create(entry.class.prototype), entry.plugin), e)
+        if (name === 'beforeMessage' && ret === false) {
+          util.makeLog('debug', `${entry.name} <${entry.key}> · beforeMessage 拦截`, 'Plugin')
+          return false
+        }
+      } catch (err) {
+        util.makeLog('error', [`${entry.name} <${entry.key}> · ${name} 出错`, err], 'Plugin')
+      }
+    }
+    return true
+  }
 
   /** 过滤事件 */
   filtEvent(e: JiuLiEvent | null, v: any) {
@@ -896,7 +933,17 @@ class PluginsLoader {
   /* ==================== 卸载/热重载 ==================== */
 
   async unloadPlugin(key: string, closeWatcher = false) {
-    /** 先清理插件注册的 express 路由与 WS 路径（热重载不重复注册） */
+    /** 生命周期：插件自定义的清理（定时器、连接等） */
+    const initInstance = this.initInstances.get(key)
+    if (typeof initInstance?.onUnload === 'function')
+      try {
+        await initInstance.onUnload()
+      } catch (err) {
+        util.makeLog('error', [`${key} · onUnload 出错`, err], 'Plugin')
+      }
+    this.initInstances.delete(key)
+
+    /** 清理插件注册的 express 路由与 WS 路径（热重载不重复注册） */
     ;(globalThis as any).Bot?.cleanupPluginResources?.(key)
 
     const entries = this.priority.filter(i => i.key === key)

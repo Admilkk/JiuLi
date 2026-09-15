@@ -94,7 +94,7 @@ npm scripts：`pnpm start` / `pnpm stop` / `pnpm rs` / `pnpm log` / `pnpm setup`
 ──────── JiuLi ────────
 JiuLi v0.1.0 启动中…
 兼容模式 · 对外标识 TRSS-Yunzai v3.1.3
-[  Server ] 启动 HTTP 服务器 http://[::]:2536
+[  Server ] 启动 HTTP 服务器 http://[::]:721
 [  Render ] 渲染后端 puppeteer 已就绪 · 类型 image · 支持 script 是
 [  Plugin ] 插件 26 个 · 规则 47 条 · 事件监听 8 个 · 定时任务 2 个 · 用时 1秒768
 [ Adapter ] 适配器 3 个 · Mock(QQ) · 标准输入(stdin) · QQBot(QQBot)
@@ -249,6 +249,29 @@ JiuLi 的对外标识**固定为 `JiuLi`（不可自定义）**；只有 `config
 - 依赖 `e.runtime.MysInfo / NoteUser / MysUser` 的插件（genshin 生态）需要 `plugins/genshin` 存在，JiuLi 会动态加载；
 - `plugins/miao-plugin` 的 `#miao` / `#miao.models` 别名已在根 `package.json#imports` 中保留；
 - 渲染后端需自行扩展时，按 `renderers/<name>/index.js` 约定导出 `(config) => renderer`。
+
+## 生态插件移植
+
+从 TRSS-Yunzai 移植过来的插件（放在 `plugins/` 下，不入库，依赖由 `pnpm install` 装）：
+
+| 插件 | 状态 | 验证方式 |
+|---|---|---|
+| `miao-plugin` | ✅ 已适配 | `#喵喵帮助` 出图 |
+| `genshin` | ✅ 已适配 | `#攻略帮助` 返回文本 |
+| `yenai-plugin` | ✅ 已适配 | `#椰奶状态` 出图 |
+| `xiaofei-plugin` | ✅ 已适配 | `#小飞帮助` 出图 |
+| `HMeme` | ✅ 已适配 | `#H表情帮助` 出图 |
+| `TRSS-Plugin` / `Yunzai-QQBot-Plugin` / `Yunzai-ICQQ-Plugin` / `hl-icqq-web` | ✅ 已适配 | 加载正常、指令可用 |
+
+移植方式：`pnpm jiuli add <git地址>`，或手动复制到 `plugins/<目录>`（**不要复制 node_modules**，交给 pnpm workspace 安装）后 `pnpm install`。
+
+已做的适配（写在插件的差异点，不是改框架契约）：
+
+- 跨插件引用路径 `../../other/xxx.js` → `../../system/xxx.js`（JiuLi 把云崽的 `other/` 并入了 `system/`）：
+  `yenai-plugin/apps/update.js`、`HMeme/apps/update.js`、`xiaofei-plugin/apps/更新.js`
+- 为兼容旧插件的具名导入，`system/update.js` 导出 `update`、`system/restart.js` 导出 `Restart`
+- 生态插件冷启动很重（miao 光资源 264MB），首次加载 15~35 秒属正常；若机器很忙可调
+  `config/config/bot.yaml → plugin_load_timeout`（默认 60 秒）
 
 ## JiuLi 原生插件
 
