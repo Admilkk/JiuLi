@@ -183,6 +183,15 @@ emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#版本' 
 await sleep(900)
 check('内置 #版本', json().includes('AGPL-3.0'))
 
+/** 很多云崽插件用框架 package.json 的版本号判断 V2/V3（例如 version[0] > 2 才算 V3，
+ *  否则走旧分支、读不到 Bot.logger 之类的 V3 能力）。这里守住版本号不被改回 0.x */
+{
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+  const { default: cfg } = await import('../lib/core/config/index.js')
+  check('框架版本号满足插件 V3 门禁（首段 > 2）', Number(pkg.version.split('.')[0]) > 2, pkg.version)
+  check('插件看到的版本号同样是 V3（cfg.package）', Number(String(cfg.package.version).split('.')[0]) > 2, String(cfg.package.version))
+}
+
 clear()
 emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#设置主人' })
 await sleep(300)

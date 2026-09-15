@@ -65,7 +65,7 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 
 ```
 [  JiuLi  ] ──────── 启动中 ────────
-[  JiuLi  ] v0.1.0 · 插件可见的框架标识 JiuLi v3.1.3
+[  JiuLi  ] v3.1.3 · 插件可见的框架标识 JiuLi v3.1.3
 [  Redis  ] 已连接 redis://127.0.0.1:6379/0
 [  Server ] 启动 HTTP 服务器 http://[::]:1721
 [  Render ] 渲染后端 puppeteer 已就绪 · 类型 image · 支持 script 是
