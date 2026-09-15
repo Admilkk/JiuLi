@@ -168,15 +168,21 @@ class PluginsLoader {
       `插件 ${logger.green(String(this.pluginCount))} 个 · 规则 ${rules} 条 · 事件监听 ${listeners} 个 · 定时任务 ${this.task.length} 个 · 用时 ${util.getTimeDiff(loadStart)}`,
       'Plugin',
     )
-    /** 加载较慢的插件：debug 级列出（首轮 import 会包含冷启动开销，仅作参考） */
+    /**
+     * 并行导入下记录的是"开始加载 → 该插件就绪"的耗时（含公共依赖解析开销）。
+     * 最后就绪的几个即启动关键路径，不代表插件本身有问题，明细放 debug。
+     */
     const sorted = Object.entries(this.load_time).sort((a, b) => b[1] - a[1])
-    const slow = sorted.filter(([, t]) => t > 200).slice(0, 5)
+    const slow = sorted.filter(([, t]) => t > 200).slice(0, 8)
     if (slow.length)
-      util.makeLog('debug', `加载耗时前列：${slow.map(([f, t]) => `${f} ${t}ms`).join(' · ')}`, 'Plugin')
-    /** 真正异常的插件（>3s）单独告警 */
-    const abnormal = sorted.filter(([, t]) => t > 3000)
-    if (abnormal.length)
-      util.makeLog('mark', `加载异常缓慢（>3s）：${abnormal.map(([f, t]) => `${f} ${logger.yellow(`${t}ms`)}`).join(' · ')}`, 'Plugin')
+      util.makeLog('debug', `就绪最慢：${slow.map(([f, t]) => `${f} ${t}ms`).join(' · ')}`, 'Plugin')
+    const key = sorted.slice(0, 3).filter(([, t]) => t > 1000)
+    if (key.length)
+      util.makeLog(
+        'mark',
+        `启动关键路径：${key.map(([f, t]) => `${f} ${logger.yellow(`${t}ms`)}`).join(' · ')} · 并行导入，耗时含公共依赖解析`,
+        'Plugin',
+      )
 
     /** 优先级排序 */
     this.priority.sort((a, b) => a.priority - b.priority)

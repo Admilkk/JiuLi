@@ -68,6 +68,42 @@ app.js（启动模式：internal/external/pm2/daemon/stop）
          └─ stat.online = 2 → emit('online')
 ```
 
+## 启动耗时分析
+
+`plugins/` 下的文件是**并行 `import()`** 的（`Promise.allSettled`），所以日志里的
+「启动关键路径」记录的是“开始加载 → 该插件就绪”的耗时，**含公共依赖解析**，
+最后就绪的几个就是拖慢启动的那几个，不代表插件自身有问题。
+
+实测（Windows / 102 个插件 / Node 25，2026-09）：
+
+| 环节 | 耗时 | 说明 |
+| --- | --- | --- |
+| 内置 16 个 system 插件 | 0.24s | 内核 + 内置插件本身 |
+| 单个重插件（genshin） | 2.2s | 主要是它的依赖图 |
+| 全部 102 个插件 | 8~14s | 视第三方插件而定 |
+
+耗时构成（`--cpu-prof` 采样，修复 yenai 之前 / 之后）：
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 模块解析（`internalModuleStat`/`lstat`/`getPackageScopeConfig`） | 55% | 68% |
+| 子进程（`spawn`/`spawnSync`，即 PowerShell） | 15% | 2% |
+| 插件自身 JS | ~1% | ~1% |
+
+结论与可操作项：
+
+1. **主因是 Node 解析模块图的文件系统调用**，不是加载策略：本机 `statSync` 单次约
+   `107µs`（Windows Defender 实时扫描 + pnpm 软链目录结构），1119 个模块文件
+   × 每个约 100 次候选路径探测 ≈ 十几秒。**串行加载 13.61s ≈ 并行加载 13.68s**，
+   证明与并发策略无关。
+2. **必须避免第三方插件在 import 阶段做同步外部调用**。典型是
+   `systeminformation`：Windows 下它用 PowerShell 查 WMI，`si.graphics()` 一次约 10s、
+   `si.cpu()`/`si.osInfo()` 各约 4.6s。yenai-plugin 原本在 5 个模块顶层直接调用，
+   仅在 import 就占了 10s 启动时间，现已改为惰性 + 记忆化（见下方「移植适配记录」）。
+3. V8 编译缓存（`NODE_COMPILE_CACHE`）实测**无收益**（24.9s → 28.0s），因为瓶颈不在解析/编译。
+4. 想进一步提速只剩一条路：**改惰性加载**（启动时只静态提取规则正则，命中才真正 import 插件），
+   与动态规则插件（运行时 `setContext` 增删规则）存在兼容风险，暂未实现。
+
 ## 消息分发
 
 ```

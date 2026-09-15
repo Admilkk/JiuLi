@@ -94,7 +94,7 @@ npm scripts：`pnpm start` / `pnpm stop` / `pnpm rs` / `pnpm log` / `pnpm setup`
 ──────── JiuLi ────────
 JiuLi v0.1.0 启动中…
 兼容模式 · 对外标识 TRSS-Yunzai v3.1.3
-[  Server ] 启动 HTTP 服务器 http://[::]:721
+[  Server ] 启动 HTTP 服务器 http://[::]:1721
 [  Render ] 渲染后端 puppeteer 已就绪 · 类型 image · 支持 script 是
 [  Plugin ] 插件 26 个 · 规则 47 条 · 事件监听 8 个 · 定时任务 2 个 · 用时 1秒768
 [ Adapter ] 适配器 3 个 · Mock(QQ) · 标准输入(stdin) · QQBot(QQBot)
@@ -265,12 +265,26 @@ JiuLi 的对外标识**固定为 `JiuLi`（不可自定义）**；只有 `config
 
 移植方式：`pnpm jiuli add <git地址>`，或手动复制到 `plugins/<目录>`（**不要复制 node_modules**，交给 pnpm workspace 安装）后 `pnpm install`。
 
+> 对插件所做的适配全部记录在 [`docs/ported-plugin-patches.md`](docs/ported-plugin-patches.md)（含逐文件 before/after），
+> 插件更新或重新拉取后照着重新应用即可。
+
 已做的适配（写在插件的差异点，不是改框架契约）：
 
 - 跨插件引用路径 `../../other/xxx.js` → `../../system/xxx.js`（JiuLi 把云崽的 `other/` 并入了 `system/`）：
   `yenai-plugin/apps/update.js`、`HMeme/apps/update.js`、`xiaofei-plugin/apps/更新.js`
 - 为兼容旧插件的具名导入，`system/update.js` 导出 `update`、`system/restart.js` 导出 `Restart`
-- 生态插件冷启动很重（miao 光资源 264MB），首次加载 15~35 秒属正常；若机器很忙可调
+- **性能适配**：`yenai-plugin` 原本在 5 个模块顶层（import 阶段）直接调用
+  `systeminformation` 的 `si.osInfo() / si.cpu() / si.memLayout() / si.graphics()`。
+  Windows 下 systeminformation 是用 PowerShell 查 WMI，本机实测 `si.graphics()` 约 10s、
+  `si.cpu()`/`si.osInfo()` 各约 4.6s，**光 import 就拖慢启动约 10 秒**。
+  已改为惰性 + 记忆化（首次渲染状态图时才取）：
+  `model/State/OtherInfo.js`、`model/State/SystemResources/{CPU,RAM,GPU}.js`，
+  并把 `model/State/index.js` 的 `getOtherInfo(e)` 改为 `await`。（详见 `docs/architecture.md` 的「启动耗时分析」）
+- `HMeme/memes` 是资源仓库（`gitee.com/fox-glaze/hmeme-img`）。若该目录**非空且没有 `.git`**，
+  插件的更新命令会报 `非空且不是 Git 仓库`：用
+  `git clone https://gitee.com/fox-glaze/hmeme-img.git plugins/HMeme/memes` 重新克隆即可
+- 生态插件冷启动很重（miao 光资源 264MB、依赖图含 jimp/sequelize/puppeteer 等），
+  首次加载数秒属正常；若机器很忙可调
   `config/config/bot.yaml → plugin_load_timeout`（默认 60 秒）
 
 ## JiuLi 原生插件
