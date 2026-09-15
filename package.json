@@ -41,7 +41,8 @@
     "test:daemon": "node test/daemon-stop.mjs",
     "test:cli": "node test/cli-session.mjs && node test/cli-args.mjs && node test/cli-deps.mjs",
     "test:broken": "node test/broken-plugin.mjs",
-    "test:redis": "node test/redis-fallback.mjs"
+    "test:redis": "node test/redis-fallback.mjs",
+    "test:render": "node test/render-check.mjs"
   },
   "imports": {
     "#miao": "./plugins/miao-plugin/components/index.js",
