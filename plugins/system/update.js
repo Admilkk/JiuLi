@@ -163,12 +163,12 @@ export default class Update extends JiuLiPlugin {
     }
 
     this.oldCommitId = await this.getCommitId(plugin)
-    logger.mark(`${this.e?.logFnc || '[更新]'} 开始${type} ${this.typeName}`)
+    Bot.makeLog('mark', `${this.e?.logFnc || ''} 开始${type} ${this.typeName}`, 'Update')
     if (!this.quiet) await this.reply(`开始${type} ${this.typeName}`)
 
     const ret = await this.exec(cmd, plugin)
     if (ret.error && !(await this.gitErr(plugin, ret.stdout, ret.error.message))) {
-      logger.mark(`${this.e?.logFnc || '[更新]'} ${type}失败 ${this.typeName}`)
+      Bot.makeLog('mark', `${this.e?.logFnc || ''} ${type}失败 ${this.typeName}`, 'Update')
       return false
     }
 
@@ -182,7 +182,7 @@ export default class Update extends JiuLiPlugin {
       const log = await this.getLog(plugin)
       if (log) await this.reply(log)
     }
-    logger.mark(`${this.e?.logFnc || '[更新]'} 最后更新时间：${time}`)
+    Bot.makeLog('mark', `${this.e?.logFnc || ''} 最后更新时间：${time}`, 'Update')
     return true
   }
 
@@ -237,7 +237,7 @@ export default class Update extends JiuLiPlugin {
       for (const dir of await fs.readdir('plugins').catch(() => [])) {
         /** 只更新 git 仓库，非仓库目录（system / demo / 自建目录）静默跳过 */
         if (!(await Bot.fsStat(path.join('plugins', dir, '.git')))) continue
-        await this.runUpdate(dir).catch(err => logger.error(`更新 ${dir} 失败`, err))
+        await this.runUpdate(dir).catch(err => Bot.makeLog('error', [`更新 ${dir} 失败`, err], 'Update'))
       }
       if (this.isPkgUp) await this.updatePackage()
       if (this.isUp) this.restart()

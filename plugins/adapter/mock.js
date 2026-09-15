@@ -28,13 +28,13 @@ function makeContact(type, id) {
       const record = { type, id, msg, at: Date.now() }
       SENT.push(record)
       /** 内容由内核的「发 ▶」日志统一输出，这里仅在 debug 下补充原始结构 */
-      logger.debug(`[Mock] ${type}:${id} · ${Bot.describeMsg ? Bot.describeMsg(msg) : typeof msg}`)
+      Bot.makeLog('debug', `${type}:${id} · ${Bot.describeMsg ? Bot.describeMsg(msg) : typeof msg}`, 'Mock')
       /** 与云崽生态适配器一致：成功时 error 为空数组（内核不应据此判定失败） */
       return { message_id: `mock-${Date.now()}-${SENT.length}`, error: [], ...record }
     },
     recallMsg(message_id) {
       RECALL.push({ type, id, message_id, at: Date.now() })
-      logger.mark(`[Mock撤回][${type}:${id}] ${message_id}`)
+      Bot.makeLog('mark', `撤回 [${type}:${id}] ${message_id}`, 'Mock')
       return true
     },
     getMsg() {
@@ -216,10 +216,10 @@ const adapter = {
           try {
             emit(JSON.parse(line))
           } catch (err) {
-            logger.error('[Mock] 事件解析失败', err)
+            Bot.makeLog('error', ['事件解析失败', err], 'Mock')
           }
         })
-        logger.mark('[Mock] stdin 注入已开启，每行一个 JSON 事件', 'Adapter')
+        Bot.makeLog('mark', 'stdin 注入已开启，每行一个 JSON 事件', 'Mock')
       })
     }
   },

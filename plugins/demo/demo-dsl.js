@@ -29,6 +29,6 @@ export default definePlugin({
       { permission: 'master', name: '性能统计' },
     ),
 
-    task('0 8 * * *', () => logger.mark('[JiuLi示例] 早安任务执行'), { name: '早安' }),
+    task('0 8 * * *', () => Bot.makeLog('mark', '[JiuLi示例] 早安任务执行', 'Demo'), { name: '早安' }),
   ],
 })

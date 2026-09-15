@@ -218,7 +218,7 @@ export default class Add extends JiuLiPlugin {
       if (msg[i].file && (await Bot.fsStat(`${this.path}${msg[i].file}`)))
         msg[i] = { ...msg[i], file: `${this.path}${msg[i].file}` }
 
-    logger.mark(`[发送消息]${this.e.logText}[${this.keyWord}]`)
+    Bot.makeLog('mark', `[发送消息]${this.e.logText}[${this.keyWord}]`, 'Add')
     const groupCfg = cfg.getGroup(this.e.self_id, this.group_id)
     return this.reply(msg, Boolean(groupCfg.addReply), {
       at: Boolean(groupCfg.addAt),
@@ -238,7 +238,7 @@ export default class Add extends JiuLiPlugin {
       const message = JSON.parse(await fs.readFile(file, 'utf8'))
       for (const i in message) messageMap[this.group_id].set(i, message[i])
     } catch (err) {
-      logger.error(`JSON 格式错误：${file} ${err}`)
+      Bot.makeLog('error', `JSON 格式错误：${file} ${err}`, 'Add')
     }
   }
 
@@ -254,7 +254,7 @@ export default class Add extends JiuLiPlugin {
       const message = JSON.parse(await fs.readFile(globalPath, 'utf8'))
       for (const i in message) messageMap.global.set(i, message[i])
     } catch (err) {
-      logger.error(`JSON 格式错误：${globalPath} ${err}`)
+      Bot.makeLog('error', `JSON 格式错误：${globalPath} ${err}`, 'Add')
     }
   }
 

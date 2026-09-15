@@ -131,7 +131,7 @@ export default class Master extends JiuLiPlugin {
         await this.edit('masterQQ', this.e.user_id)
         await this.edit('master', `${this.e.self_id}:${this.e.user_id}`)
       } catch (err) {
-        logger.error('写入主人配置失败', err)
+        Bot.makeLog('error', ['写入主人配置失败', err], 'Master')
         return this.reply(`写入配置失败：${err.message || err}`, true)
       }
       return this.reply(`[${this.e.user_id}] 设置主人完成`, true)

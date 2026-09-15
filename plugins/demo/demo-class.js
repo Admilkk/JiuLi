@@ -40,6 +40,6 @@ export default class ExampleClass extends JiuLiPlugin {
   async daily() {
     const files = await import('node:fs/promises')
     await files.writeFile(`${this.dataDir}/last-daily.txt`, new Date().toISOString())
-    logger.mark('[JiuLi示例] 每日任务已执行')
+    Bot.makeLog('mark', '[JiuLi示例] 每日任务已执行', 'Demo')
   }
 }

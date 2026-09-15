@@ -66,7 +66,7 @@ export default class Reload extends JiuLiPlugin {
       }
 
       const msg = `处理完成 · 成功 ${ok} 个${failed.length ? ` · 失败 ${failed.length} 个（${failed.join(', ')}）` : ''} · 用时 ${Date.now() - start}ms`
-      logger.mark(msg)
+      Bot.makeLog('mark', msg, 'Reload')
       if (e.group_id) await Bot.sendGroupMsg(e.self_id, e.group_id, msg)
       else await Bot.sendFriendMsg(e.self_id, e.user_id, msg)
     }, 1500)

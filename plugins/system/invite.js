@@ -14,10 +14,10 @@ export default class Invite extends JiuLiPlugin {
 
   async accept() {
     if (!this.e.isMaster && cfg.other.autoGroup !== 1) {
-      logger.mark(`[邀请加群]：${this.e.group_name}：${this.e.group_id}`)
+      Bot.makeLog('mark', `[邀请加群]：${this.e.group_name}：${this.e.group_id}`, 'Invite')
       return
     }
-    logger.mark(`[${this.e.isMaster ? '主人' : '自动同意'}邀请加群]：${this.e.group_name}：${this.e.group_id}`)
+    Bot.makeLog('mark', `[${this.e.isMaster ? '主人' : '自动同意'}邀请加群]：${this.e.group_name}：${this.e.group_id}`, 'Invite')
     this.e.approve?.(true)
     this.e.bot?.pickFriend(this.e.user_id)?.sendMsg(`已同意加群：${this.e.group_name}`)
   }

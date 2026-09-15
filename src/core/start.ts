@@ -118,17 +118,22 @@ export async function supervise() {
   const entry = process.argv[1]
   const args = process.argv.slice(2).filter(a => a !== 'daemon')
   let stopping = false
-  process.once('SIGINT', () => (stopping = true))
-  process.once('SIGTERM', () => (stopping = true))
+  let child: ReturnType<typeof spawn> | undefined
+  /** SIGHUP 也要处理：SSH 断开时终端会发它，否则守护进程退出、子进程变孤儿继续占端口 */
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const)
+    process.once(sig, () => {
+      stopping = true
+      child?.kill('SIGTERM')
+    })
 
   let restarts = 0
   while (!stopping) {
-    const child = spawn(process.execPath, [entry, ...args], {
+    child = spawn(process.execPath, [entry, ...args], {
       stdio: 'inherit',
       env: { ...process.env, app_type: 'internal', JIULI_CHILD: '1' },
     })
     const { code, signal } = await new Promise<{ code: number | null; signal: string | null }>(resolve =>
-      child.on('exit', (c, s) => resolve({ code: c, signal: s })),
+      child!.on('exit', (c, s) => resolve({ code: c, signal: s })),
     )
 
     if (stopping) {
