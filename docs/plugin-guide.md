@@ -140,6 +140,22 @@ await e.group.sendMsg('主动发群消息')
 await Bot.sendGroupMsg(bot_id, group_id, '指定机器人发送')
 ```
 
+## 事件总线（Bot.on）
+
+`Bot` 是 EventEmitter，`on` / `once` / `emit` / `off` / `listenerCount` / `eventNames` 等全部可用：
+
+```js
+Bot.on('message', e => logger.debug(`${e.group_id ?? e.user_id}: ${e.raw_message}`))
+Bot.on('notice.group.poke', e => { /* ... */ })
+Bot.on('connect.' + Bot.uin[0], ({ bot }) => logger.mark(`账号 ${bot.uin} 已连接`))
+```
+
+- `Bot.on('message')` 收到的是**原始事件**，不经过 accept / rule，也没有权限与冷却
+- `Bot.em(name, data)` 逐级 emit（`message.group.normal` → `message.group` → `message`），
+  且仅在 `data.self_id` 是已注册账号时才补全 `bot` / `friend` / `group` / `member`
+- 监听器按注册顺序触发；插件先于 `lib/events/*` 加载，所以插件顶层注册的监听器先收到事件
+- 需要权限与指令匹配的用 `rule` / `accept`，不要在 `Bot.on` 里自己解析文本
+
 ## 渲染
 
 模板放 `plugins/<插件>/resources/<路径>.html`（art-template）：

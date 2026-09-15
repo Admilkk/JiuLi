@@ -152,7 +152,7 @@ jiuli/
 
 已支持：`plugin` 基类全部字段与方法、`rule` / `task` / `handler` / `accept` / `init()`、上下文会话、
 事件对象 `e` 常用面、全局变量与 `lib/` 下可导入路径、云崽的消息计数键、渲染模板约定与旧截图入口、
-适配器契约、热重载。
+适配器契约、`Bot` 事件总线（`Bot.on('message')` 原始事件流）、热重载。
 
 **框架标识固定为 `JiuLi`，不可自定义**。只有 `config/config/jiuli.yaml → compat.spoof_yunzai: true`
 （插件伪装模式）才对外展示 `trss-yunzai`，让个别插件走 TRSS 专属分支。插件里写死的框架名框架改不了。
