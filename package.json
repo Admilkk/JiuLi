@@ -34,8 +34,9 @@
     "test": "node test/smoke.mjs",
     "test:hot": "node test/hotreload.mjs",
     "test:restart": "node test/supervisor-check.mjs",
-    "test:all": "node test/smoke.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs && node test/ported-plugins.mjs",
+    "test:all": "node test/smoke.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs && node test/update-check.mjs && node test/ported-plugins.mjs",
     "test:ported": "node test/ported-plugins.mjs",
+    "test:update": "node test/update-check.mjs",
     "test:load": "node test/load-check.mjs"
   },
   "imports": {
@@ -43,6 +44,7 @@
     "#miao.models": "./plugins/miao-plugin/models/index.js"
   },
   "dependencies": {
+    "@zxing/library": "^0.23.0",
     "art-template": "4.13.2",
     "chalk": "^5.3.0",
     "chokidar": "^4.0.3",
@@ -50,8 +52,10 @@
     "es-toolkit": "^1.52.0",
     "express": "^5.2.1",
     "file-type": "^22.0.2",
+    "fluent-ffmpeg": "^2.1.3",
     "https-proxy-agent": "^7.0.6",
     "image-size": "^2.0.2",
+    "jsqr": "^1.4.0",
     "level": "^10.0.0",
     "lodash": "^4.17.21",
     "log4js": "^6.9.1",
@@ -64,6 +68,7 @@
     "puppeteer": "*",
     "redis": "^4.7.1",
     "sequelize": "^6.37.8",
+    "sharp": "^0.33.2",
     "sqlite3": "npm:@karinjs/sqlite3@^0.4.3",
     "strip-ansi": "^7.2.0",
     "ulid": "^3.0.2",
