@@ -169,6 +169,36 @@ const ecoUpdate = new Update()
 ecoUpdate.e = { isMaster: true, msg: '#更新miao-plugin', reply: async () => ecoReply++ }
 check('生态用法：new Update() 后手工设 e 可用', (await ecoUpdate.getPlugin('miao-plugin')) === 'miao-plugin' && ecoReply === 0)
 
+/* ---- 9. 规则路由：消息能否命中对应的处理函数（#更新ICQQ 的关键） ---- */
+const rules = new Update().rule.map(r => ({
+  fnc: r.fnc,
+  reg: typeof r.reg === 'string' ? new RegExp(r.reg) : r.reg,
+}))
+const route = msg => rules.find(r => r.reg.test(msg))?.fnc || 'none'
+const cases = [
+  ['#更新', 'update'],
+  ['#更新ICQQ', 'update'],
+  ['#更新 miao-plugin', 'update'],
+  ['#更新Yunzai-ICQQ-Plugin', 'update'],
+  ['#静更新ICQQ', 'update'],
+  ['#安静更新', 'update'],
+  ['#强制更新ICQQ', 'update'],
+  ['#静强制更新', 'update'],
+  ['#全部更新', 'updateAll'],
+  ['#全部静更新', 'updateAll'],
+  ['#全部强制更新', 'updateAll'],
+  ['#全部安静强制更新', 'updateAll'],
+  ['#更新日志', 'updateLog'],
+  ['#更新日志ICQQ', 'updateLog'],
+  ['#重启更新', 'update'],
+]
+const wrong = cases.filter(([msg, fnc]) => route(msg) !== fnc)
+check(
+  `规则路由正确（${cases.length} 个消息样例）`,
+  wrong.length === 0,
+  wrong.length ? wrong.map(([m, f]) => `${m} → ${route(m)}（应 ${f}）`).join('; ') : cases.map(c => c[0]).join(' '),
+)
+
 fs.rmSync(TMP, { recursive: true, force: true })
 const pass = results.filter(Boolean).length
 console.log(`\n=== 更新插件测试：${pass}/${results.length} 通过 ===`)
