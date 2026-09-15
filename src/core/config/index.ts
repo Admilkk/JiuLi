@@ -220,10 +220,12 @@ class Cfg {
     return merged
   }
 
-  /** 使某配置及其群配置缓存失效 */
+  /** 使某配置及其群配置缓存失效（含 getYaml 自己的解析缓存，否则写完配置再读还是旧值） */
   invalidate(name: string) {
     this.mergedCache.delete(name)
     this.groupCache.clear()
+    delete this.config[`config.${name}`]
+    delete this.config[`default_config.${name}`]
   }
 
   getYaml(type: string, name: string): any {

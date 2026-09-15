@@ -251,15 +251,36 @@ check('内置 #设置主人（错误验证码 + 上下文结束）', json().incl
   check('#新增主人（@ 用户）', json().includes('[34567890] 已被设置为主人') && cfgText.includes('34567890'), json().slice(0, 60))
 
   clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#设置主人 45678901' })
+  await sleep(500)
+  cfgText = fs.readFileSync('test/.tmp-config/other.yaml', 'utf8')
+  check(
+    '#设置主人（带 QQ 号，与新增同一规则）',
+    json().includes('[45678901] 已被设置为主人') && cfgText.includes('45678901'),
+    json().slice(0, 60),
+  )
+
+  clear()
   emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#删除主人 23456789' })
   await sleep(500)
   cfgText = fs.readFileSync('test/.tmp-config/other.yaml', 'utf8')
   check('#删除主人', json().includes('[23456789] 已被移除主人') && !cfgText.includes('23456789'), json().slice(0, 60))
 
+  /** 不带目标：主人提示已是主人，非主人回到验证码流程（与 #设置主人 一致） */
   clear()
   emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#新增主人' })
   await sleep(400)
-  check('#新增主人（没带 QQ 时的提示）', json().includes('请 @用户 或带上 QQ 号'), json().slice(0, 40))
+  check('#新增主人（主人、不带目标）→ 已是主人', json().includes('已经为主人'), json().slice(0, 40))
+
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '99996', msg: '#新增主人' })
+  await sleep(400)
+  check('#新增主人（非主人）→ 走验证码流程', json().includes('请输入验证码'), json().slice(0, 40))
+
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '99999', msg: '#删除主人 10001' })
+  await sleep(400)
+  check('#删除主人（非主人发起）被拒绝', !json().includes('已被移除主人'), json().slice(0, 60))
 
   /** 还原测试用主人配置 */
   fs.writeFileSync(
