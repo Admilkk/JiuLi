@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+process.env.JIULI_NO_AUTO_INSTALL = '1' // 测试环境不自动安装
 const DIR = 'test/.tmp-redis/'
 process.env.JIULI_CONFIG_DIR = DIR
 fs.rmSync(DIR, { recursive: true, force: true })

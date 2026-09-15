@@ -133,7 +133,14 @@ check(
 )
 check('指引给出三种选择', none.out.includes('node jiuli s') && none.out.includes('node .'), '')
 
-/* ---- 4. 已在 tmux 内：不再套娃，直接启动 ---- */
+/* ---- 4. 已在复用终端内：不再套娃（tmux 用 TMUX，screen 用 STY） ---- */
+const inScreen = cli(['m'], { pathPrefix: null, env: { STY: '12345.pts-0.host' } })
+check(
+  '已在 screen 会话内时直接启动（不再套一层 screen）',
+  inScreen.out.includes('已在 screen 会话内') && !inScreen.out.includes('Attaching from inside'),
+  inScreen.out.split('\n')[0],
+)
+
 const inside = cli(['m'], { pathPrefix: null, env: { TMUX: '/tmp/tmux-1000/default,123,0' } })
 check(
   '已在 tmux 会话内时直接启动（不再套一层 tmux）',

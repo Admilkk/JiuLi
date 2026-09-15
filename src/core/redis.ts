@@ -425,6 +425,39 @@ export class Redis {
     return this.redis.once('error', this.onerror)
   }
 
+  /**
+   * 本机没有 Redis 时尝试自动安装（仅 root + 已知包管理器，装不上就按 redis_fallback 降级）
+   * 首次部署最常见的缺件就是它，与其让日志报一堆 ECONNREFUSED 不如直接补齐
+   */
+  private async installLocal(): Promise<boolean> {
+    if (process.env.JIULI_NO_AUTO_INSTALL) return false
+    if (typeof process.getuid !== 'function' || process.getuid() !== 0) return false
+    const pick = async (bin: string, args: string[]) =>
+      (await util.cmdPath(bin)) ? [bin, ...args] : null
+    const cmd =
+      (await pick('apt-get', ['update', '-qq'])) && (await pick('apt-get', ['install', '-y', '-qq', 'redis-server']))
+    const dnf = (await pick('dnf', ['install', '-y', 'redis'])) || (await pick('yum', ['install', '-y', 'redis']))
+    const use = cmd || dnf
+    if (!use) return false
+
+    util.makeLog(
+      'warn',
+      `本机没有 Redis，正在自动安装：${use.join(' ')}\n` +
+        `        （不想自动装可执行 redis.yaml → path 指定自己的 redis-server，或关掉 redis_fallback）`,
+      'Redis',
+    )
+    const ret: any = await util.exec(use.join(' '), { quiet: true, timeout: 300000 })
+    if (ret.error) {
+      util.makeLog('error', `自动安装 Redis 失败：${ret.stderr || ret.error.message || ret.error}`, 'Redis')
+      return false
+    }
+    if (await util.cmdPath('systemctl')) {
+      const svc: any = await util.exec('systemctl enable --now redis-server', { quiet: true })
+      if (!svc.error) util.makeLog('mark', 'Redis 已安装并设为开机自启', 'Redis')
+    }
+    return true
+  }
+
   async start(): Promise<any> {
     const host = this.opts.socket.host
     if (!['127.0.0.1', 'localhost', '::1'].includes(String(host))) {
@@ -434,7 +467,9 @@ export class Redis {
     }
 
     const cmd = String(cfg.redis.path || 'redis-server')
-    const pathOk = await util.cmdPath(cmd.split(' ')[0])
+    let pathOk = await util.cmdPath(cmd.split(' ')[0])
+    /** 没装就先试着装上（首次部署的常见缺件） */
+    if (!pathOk && (await this.installLocal())) pathOk = await util.cmdPath(cmd.split(' ')[0])
     if (pathOk) {
       util.makeLog('info', `正在启动 ${cmd} --port ${this.opts.socket.port}`, 'Redis')
       const proc: any = spawn(cmd, ['--port', String(this.opts.socket.port)], { shell: true })

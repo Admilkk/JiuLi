@@ -149,9 +149,10 @@ function cmdSession(args = []) {
   ensureBuild()
   ensureConfig()
 
-  /** 已经身处 tmux 里就不用再套一层，直接跑 */
-  if (process.env.TMUX) {
-    info('已在 tmux 会话内，直接启动 …')
+  /** 已经身处 tmux / screen 里就不用再套一层，直接跑（screen 用 STY 标识） */
+  if (process.env.TMUX || process.env.STY) {
+    const which = process.env.TMUX ? 'tmux' : 'screen'
+    info(`已在 ${which} 会话内，直接启动 …`)
     return run(process.execPath, [path.join(CWD, 'app.js'), ...appArgs])
   }
 
@@ -191,7 +192,9 @@ function cmdSession(args = []) {
 
 /** 接回已有会话 */
 function cmdAttach() {
-  if (process.env.TMUX) return info('已在 tmux 会话内')
+  if (process.env.TMUX || process.env.STY) {
+    return info(`已经在 ${process.env.TMUX ? 'tmux' : 'screen'} 会话里了`)
+  }
   if (hasCmd('tmux')) {
     const has = spawnCmd('tmux', ['has-session', '-t', SESSION], { stdio: 'ignore' })
     if (has.status !== 0) fail(`没有名为 ${SESSION} 的会话，先执行：node jiuli m`)
