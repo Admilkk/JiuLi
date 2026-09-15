@@ -173,7 +173,13 @@ check(
 )
 check(
   '超时后给出原因与后续做法',
-  lines.some(l => l.includes('插件加载超时') && l.includes('卡死.js') && l.includes('#重载')),
+  lines.some(
+    l =>
+      l.includes('插件加载超时') &&
+      l.includes('卡死.js') &&
+      l.includes('#重载') &&
+      l.includes('.disabled'),
+  ),
   lines.find(l => l.includes('插件加载超时'))?.replace(/\s+/g, ' ').slice(0, 110) || '（没有超时提示）',
 )
 check('卡死插件不会拖住启动（超时后照常继续）', loaded === 'ok' && Date.now() - startAt < 30000)

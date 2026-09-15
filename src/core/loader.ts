@@ -153,26 +153,46 @@ class PluginsLoader {
     }, 5000)
     report.unref?.()
 
-    await Promise.allSettled(
-      files.map(async file => {
+    /**
+     * 并发导入插件。
+     *
+     * 不能一次全放出去：Node 的 ESM 加载器在「多个模块同时求值、其中又有顶层 await」时
+     * 会出现锁竞争，实测在 96 个插件的机器上会整体卡死（每个都开始导入、一个都不完成，
+     * 事件循环却空闲、没有任何句柄 —— 承诺型死锁）；串行导入同样的插件只要 10 秒。
+     * 并发数可用 config/jiuli.yaml → perf.load_concurrency 调整（1 即完全串行）。
+     */
+    const concurrency = Math.max(1, Math.min(Number(cfg.getPerf().load_concurrency) || 4, files.length))
+    const queue = [...files]
+    /** 一旦有插件超时，说明加载器被它卡住了：继续导入只会一个个耗完超时，直接收工 */
+    let stalled = false
+    const worker = async () => {
+      while (queue.length && !stalled) {
+        const file = queue.shift()!
         const timeout = cfg.bot.plugin_load_timeout * 1000
         const started = Date.now()
-        if ((await util.sleep(timeout, this.importPlugin(file, packageErr))) === util.sleepTimeout)
+        if ((await util.sleep(timeout, this.importPlugin(file, packageErr))) === util.sleepTimeout) {
+          stalled = true
+          const rest = queue.length
+          queue.length = 0
           util.makeLog(
             'error',
             `插件加载超时（${timeout / 1000} 秒）${logger.red(file.name)}\n` +
-              `        插件顶层可能在等网络 / 连服务；已跳过，其余插件不受影响（可调 bot.yaml → plugin_load_timeout）\n` +
-              `        若它稍后才加载完，发 #重载 让它正式生效`,
+              `        该插件顶层可能在做重活或卡住了，并且会阻塞后续插件的导入\n` +
+              `        本轮已加载 ${this.pluginCount} 个插件${rest ? `，跳过剩余 ${rest} 个` : ''}；修好后发 #重载 或重启即可\n` +
+              `        排查：临时把该文件改名（如加 .disabled 后缀）或移走，再看是否恢复正常`,
             'Plugin',
           )
-        else if (Date.now() - started > 5000)
+        } else if (Date.now() - started > 5000)
           util.makeLog(
             'warn',
             `插件就绪较慢 ${logger.yellow(file.name)} · ${util.getTimeDiff(started)}（不影响启动，仅供参考）`,
             'Plugin',
           )
         pending.delete(file.name)
-      }),
+      }
+    }
+    await Promise.allSettled(
+      Array.from({ length: concurrency }, () => worker()),
     )
     clearInterval(report)
 

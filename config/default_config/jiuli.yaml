@@ -29,3 +29,6 @@ perf:
   once_instance: true
   # 事件类型索引：按 event 预分组插件，避免每条消息全量遍历
   event_index: true
+  # 插件并发导入数。Node 的 ESM 加载器在「多个模块同时求值 + 顶层 await」时
+  # 会有锁竞争，插件多（几十个以上）或内存小的机器建议调成 1~2（1 为完全串行）
+  load_concurrency: 4
