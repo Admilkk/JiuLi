@@ -6,19 +6,43 @@
 
 适配只改插件自己的代码/配置，不动框架契约；框架侧的兼容层在 `src/` 与 `lib/` 里。
 
-## 1. 跨插件引用路径 `other/` → `system/`
+## 1. 跨插件引用路径 `other/` → `system/`（**已不需要**，框架提供别名）
 
-云崽把内置插件放 `plugins/other/`，JiuLi 并入了 `plugins/system/`，旧插件里对内置插件的
-相对引用需要跟着改：
+云崽把内置插件放 `plugins/other/`，JiuLi 并入了 `plugins/system/`。**框架现在自己提供
+`plugins/other/` 别名**（转发到 `system/` 对应文件），所以云崽插件里的
+`import { update } from '../../other/update.js'` 不用改一个字就能用。
 
-| 文件 | 改动 |
-| --- | --- |
-| `yenai-plugin/apps/update.js` | `../../other/update.js` → `../../system/update.js` |
-| `HMeme/apps/update.js` | `../../other/update.js` → `../../system/update.js` |
-| `xiaofei-plugin/apps/更新.js` | `../../other/restart.js` → `../../system/restart.js` |
+别名文件在 `plugins/other/{update,restart,sendLog,version}.js`（随仓库分发），
+加载器会跳过该目录（它是别名，不是插件源），不会重复注册。
 
-配套地，`plugins/system/update.js` 补 `export { Update as update }`、
-`plugins/system/restart.js` 补 `export { Restart }`，让旧插件的具名导入成立。
+| 文件 | 原来要改的 | 现状 |
+| --- | --- | --- |
+| `yenai-plugin/apps/update.js` | `../../other/update.js` → `../../system/update.js` | 不用改 |
+| `HMeme/apps/update.js` | 同上 | 不用改 |
+| `xiaofei-plugin/apps/更新.js` | `../../other/restart.js` → `../../system/restart.js` | 不用改 |
+| `arknights-plugin/apps/update.js`、`hl-*` 系列 | 同上 | 不用改 |
+
+已经改成 `../../system/...` 的插件也不用回退（两条路都能解析）。
+
+配套地，`plugins/system/update.js` 仍导出 `update`、`plugins/system/restart.js` 仍导出
+`Start` / `Restart`，供具名导入使用。
+
+## 1b. 框架版本号必须是 V3 家族（`3.x`）
+
+不少云崽插件用**框架 `package.json` 的版本号**判断走 V2 还是 V3 分支，例如
+`xiaoyao-cvs-plugin`：
+
+```js
+const yunzaiVersion = JSON.parse(fs.readFileSync('package.json')).version
+const isV3 = yunzaiVersion[0] * 1 > 2
+```
+
+JiuLi 早期版本号是 `0.1.0` → `isV3 = false` → 插件走旧分支 → 读不到的 `Bot.logger`
+直接抛 `Cannot read properties of undefined (reading 'info')`。
+
+所以 **`package.json` 的 version 固定为 `3.1.3`**（与 `config/jiuli.yaml → compat.framework_version`
+一致，插件从文件读和从 `cfg.package` 读得到同一个 V3 版本号）。框架名仍然是 `JiuLi`，
+只有版本号对齐 V3 家族。修改版本号前请先确认没有插件依赖这个门槛。
 
 ## 2. yenai-plugin：把 `systeminformation` 的 import 期调用改成惰性（启动省约 10 秒）
 
