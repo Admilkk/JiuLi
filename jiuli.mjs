@@ -168,10 +168,15 @@ function cmdBuild() {
   ok('内核编译完成')
 }
 
-function cmdTest() {
+function cmdTest(args = []) {
   ensureDeps()
   ensureBuild()
-  const ret = run(process.execPath, ['test/smoke.mjs'])
+  const suite = args.includes('--hot')
+    ? 'test/hotreload.mjs'
+    : args.includes('--restart')
+      ? 'test/supervisor-check.mjs'
+      : 'test/smoke.mjs'
+  const ret = run(process.execPath, [suite])
   process.exit(ret.status ?? 0)
 }
 
@@ -294,45 +299,78 @@ function cmdList() {
   }
 }
 
+function cmdFlush() {
+  pm2(['flush', 'JiuLi'])
+  ok('已清空 pm2 日志文件（下次 pnpm log 只显示新日志）')
+}
+
 function cmdHelp() {
-  console.log(`JiuLi CLI
+  console.log(`JiuLi CLI   （node jiuli <命令> 或 node jiuli.mjs <命令>）
 
-  node jiuli.mjs init          安装依赖 + 编译内核 + 生成配置
-  node jiuli.mjs create <名称> [--dsl] [--dir]
-                               生成插件骨架（默认 plugins/example/<名称>.js，热重载）
-  node jiuli.mjs add <git地址>  安装第三方插件（克隆到 plugins/ 并装依赖）
-  node jiuli.mjs list          列出 plugins/ 下的插件目录
-  node jiuli.mjs start         pm2 后台启动（--fg 前台运行）
-  node jiuli.mjs stop          停止
-  node jiuli.mjs rs            重启
-  node jiuli.mjs log [条数]     查看日志（-f 持续输出）
-  node jiuli.mjs build         编译内核
-  node jiuli.mjs test          冒烟测试
-  node jiuli.mjs status        环境与运行状态
+  命令            简写            说明
+  ─────────────────────────────────────────────────────────────
+  init            i             安装依赖 + 编译内核 + 生成配置
+  start           s             pm2 后台启动（自动检查依赖/构建/配置）
+  start --fg      f             前台启动（Ctrl+C 退出）
+  stop            x             停止
+  restart         r / rs        重启
+  log [条数]       l             查看日志（-f 持续输出）
+  status          st            环境与运行状态
+  list            ls            列出 plugins/ 下的插件目录
+  create <名称>    c             生成插件骨架（--dsl 函数式 / --dir 独立目录）
+  add <git地址>    a             安装第三方插件（克隆到 plugins/ 并装依赖）
+  build           b             编译内核
+  test            t             冒烟测试（--hot 热重载 / --restart 守护进程）
+  flush                         清空 pm2 日志文件
+  help            h / ?         本说明
 
-等价 npm scripts：pnpm setup / pnpm start / pnpm stop / pnpm rs / pnpm log / pnpm build / pnpm test`)
+  等价 npm scripts：pnpm setup / pnpm start / pnpm stop / pnpm rs / pnpm log / pnpm build / pnpm test`)
 }
 
 const [cmd = 'help', ...args] = process.argv.slice(2)
+/** 命令表：长命令 + 短别名 */
 const commands = {
+  // 安装/初始化
   init: cmdInit,
+  i: cmdInit,
+  setup: cmdInit,
+  // 插件
   create: () => cmdCreate(args),
+  c: () => cmdCreate(args),
   new: () => cmdCreate(args),
   add: () => cmdAdd(args),
+  a: () => cmdAdd(args),
   install: () => cmdAdd(args),
   list: cmdList,
   ls: cmdList,
+  // 运行
   start: () => cmdStart(args),
+  s: () => cmdStart(args),
   run: () => cmdStart(args),
+  f: () => cmdStart(['--fg']),
+  fg: () => cmdStart(['--fg']),
   stop: cmdStop,
-  rs: cmdRestart,
+  x: cmdStop,
+  kill: cmdStop,
   restart: cmdRestart,
+  r: cmdRestart,
+  rs: cmdRestart,
+  // 观测
   log: () => cmdLog(args),
+  l: () => cmdLog(args),
   logs: () => cmdLog(args),
-  build: cmdBuild,
-  test: cmdTest,
   status: cmdStatus,
+  st: cmdStatus,
+  info: cmdStatus,
+  flush: cmdFlush,
+  // 开发
+  build: cmdBuild,
+  b: cmdBuild,
+  test: () => cmdTest(args),
+  t: () => cmdTest(args),
   help: cmdHelp,
+  h: cmdHelp,
+  '?': cmdHelp,
 }
 
 if (!commands[cmd]) {

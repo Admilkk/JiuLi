@@ -154,20 +154,19 @@ class Cfg {
   }
 
   /**
-   * 对外暴露的框架名（插件用它识别/显示框架，如 yenai、genshin、xiaofei 的状态与关于页）
-   * 配置：config/jiuli.yaml → compat.framework_name（默认 JiuLi；填 trss-yunzai 可让
-   * 旧插件走 TRSS 专属分支，但显示也会变成 TRSS-Yunzai）
+   * 对外暴露的框架名（插件用它识别/显示框架）
+   * - 默认固定为 `JiuLi`，**不可自定义**
+   * - 只有开启「插件伪装模式」（config/jiuli.yaml → compat.spoof_yunzai: true）才对外展示 trss-yunzai，
+   *   用于个别插件在 TRSS 专属分支下才正常的情况
    */
   get frameworkName(): string {
-    const compat = this.getCompat()
-    const name = compat.framework_name ?? compat.frameworkName
-    return name ? String(name) : 'JiuLi'
+    return this.getCompat().spoof_yunzai === true ? 'trss-yunzai' : 'JiuLi'
   }
 
   /** 对外暴露的版本号（插件用它做功能门禁；沿用 3.1.3 可避免老插件判定"版本过低"） */
   get frameworkVersion(): string {
     const compat = this.getCompat()
-    return String(compat.framework_version ?? compat.frameworkVersion ?? compat.version ?? '3.1.3')
+    return String(compat.framework_version ?? compat.version ?? '3.1.3')
   }
 
   /** 兼容层配置 */

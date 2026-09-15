@@ -35,22 +35,26 @@ pnpm install && pnpm start     # 安装依赖 → 自动构建 → pm2 后台启
 
 常用命令（CLI 与 npm scripts 等价）：
 
-| 命令 | 说明 |
-|---|---|
-| `pnpm start` | pm2 后台启动（自动检查依赖/构建/配置；`pnpm start --fg` 前台） |
-| `pnpm stop` | 停止 |
-| `pnpm rs` | 重启（重启完成后会通知到原会话） |
-| `pnpm log [条数]` | 查看日志（`pnpm log -f` 持续输出） |
-| `pnpm run setup` | 仅安装依赖 + 编译内核 + 生成配置 |
-| `pnpm app` | 前台直接运行（`node .`） |
-| `pnpm build` / `pnpm watch` / `pnpm typecheck` | 编译 / 增量编译 / 类型检查 |
-| `pnpm test` | 冒烟测试（27 项：旧插件 / 内置插件 / 渲染 / 诊断） |
-| `pnpm test:hot` | 热重载测试（新增 / 修改 / 删除 js、新建目录） |
-| `pnpm test:restart` | 守护进程与重启契约测试 |
-| `pnpm jiuli create <名称>` | 生成插件骨架（`--dsl` 用函数式形态，`--dir` 建独立目录） |
-| `pnpm jiuli add <git地址>` | 安装第三方插件（克隆到 `plugins/` 并自动装依赖） |
-| `pnpm jiuli list` | 列出 `plugins/` 下的插件目录 |
-| `pnpm jiuli status` | 环境与运行状态 |
+命令行用法：`node jiuli <命令>`（也支持 `node jiuli.mjs`、`pnpm jiuli`）
+
+| 命令 | 简写 | 说明 |
+|---|---|---|
+| `init` | `i` | 安装依赖 + 编译内核 + 生成配置 |
+| `start` | `s` | pm2 后台启动（自动检查依赖/构建/配置） |
+| `start --fg` | `f` | 前台启动（Ctrl+C 退出） |
+| `stop` | `x` | 停止 |
+| `restart` | `r` / `rs` | 重启（重启完成后会通知到原会话） |
+| `log [条数]` | `l` | 查看日志（`-f` 持续输出，`flush` 清空日志文件） |
+| `status` | `st` | 环境与运行状态 |
+| `list` | `ls` | 列出 `plugins/` 下的插件目录 |
+| `create <名称>` | `c` | 生成插件骨架（`--dsl` 函数式 / `--dir` 独立目录） |
+| `add <git地址>` | `a` | 安装第三方插件（克隆到 `plugins/` 并自动装依赖） |
+| `build` | `b` | 编译内核 |
+| `test` | `t` | 测试（`--hot` 热重载 / `--restart` 守护进程） |
+| `flush` | | 清空 pm2 日志文件 |
+| `help` | `h` / `?` | 命令说明 |
+
+npm scripts：`pnpm start` / `pnpm stop` / `pnpm rs` / `pnpm log` / `pnpm setup` / `pnpm build` / `pnpm test` / `pnpm app`（= `node .`）
 
 启动模式：
 
@@ -203,7 +207,8 @@ jiuli/
 - 热重载：平铺插件文件的新增/修改/删除（有 `index.js` 的目录不监听，与云崽一致）
 
 **框架探测与对外标识**：生态插件通过框架名判断分支/显示（如 yenai、genshin、xiaofei 的状态页，miao 的 `isMiao`）。
-JiuLi 通过 `config/jiuli.yaml → compat.framework_name` 暴露自己的标识：
+JiuLi 的对外标识**固定为 `JiuLi`（不可自定义）**；只有 `config/jiuli.yaml → compat.spoof_yunzai: true`
+（插件伪装模式）才对外展示 `trss-yunzai`，用于个别插件只在 TRSS 专属分支下正常的情况：
 
 | 插件 | 读取方式 | 显示 |
 |---|---|---|
@@ -211,8 +216,11 @@ JiuLi 通过 `config/jiuli.yaml → compat.framework_name` 暴露自己的标识
 | 直接打印 `cfg.package.name` 的插件 | 同上 | **JiuLi** |
 | `miao-plugin` | 直接读真实 `package.json`（`jiuli`） | `Yunzai-Bot`（miao 硬编码的默认名，需要它自己加分支） |
 
-想让它退回 TRSS 分支（例如某个插件在非 TRSS 分支下行为异常），把 `framework_name` 改成 `trss-yunzai` 即可，
-显示名也会随之变成 TRSS-Yunzai——插件只有一个名字来源，无法既显示 JiuLi 又走 TRSS 分支。
+开启伪装模式（`spoof_yunzai: true`）后，显示名与分支判断都会变成 TRSS-Yunzai——插件只有一个名字来源，
+无法既显示 JiuLi 又走 TRSS 分支。
+
+> 插件里**写死的**框架名框架改不了（例如 hl-icqq-web 状态面板的 `Yunzai` 字样、miao 的 `Yunzai-Bot` 默认名），
+> 需要插件自己读 `cfg.frameworkName` 或改那一行文案。
 
 **实机验证记录**：
 

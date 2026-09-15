@@ -1,12 +1,11 @@
 # ===== JiuLi 框架专属配置 =====
 
-# ---- 对外标识（插件探测用）----
 compat:
-  # 插件识别到的框架名：yenai / genshin / xiaofei 等的状态页、版本页、分支判断都读它
-  #   JiuLi        显示为 JiuLi（推荐）
-  #   trss-yunzai  显示 TRSS-Yunzai，并让部分插件走 TRSS 专属分支
-  # 注意：miao-plugin 是直接读真实 package.json 的（那里始终是 jiuli），不受此项影响
-  framework_name: JiuLi
+  # 插件伪装模式（默认关闭）
+  #   关闭：插件识别/显示到的框架名固定为 JiuLi（不可自定义）
+  #   开启：对外展示 trss-yunzai，让个别插件走 TRSS 专属分支（显示名也会变成 TRSS-Yunzai）
+  # 注意：miao-plugin 直接读真实 package.json（jiuli），不受此项影响
+  spoof_yunzai: false
   # 对外暴露的版本号：插件用它做功能门禁，沿用 3.1.3 可避免老插件判定"版本过低"而禁用功能
   framework_version: "3.1.3"
   # 注入全局变量 Bot / logger / redis / segment / Renderer / plugin
