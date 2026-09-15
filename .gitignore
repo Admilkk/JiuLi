@@ -40,3 +40,7 @@ plugins/_test-fixtures/
 .vscode/
 *.log
 test/.commit-msg
+
+# 测试/调试临时产物
+test/.tmp-*/
+test/tmp-*.mjs

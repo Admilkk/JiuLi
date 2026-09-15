@@ -1,3 +1,0 @@
-log_level: info
-plugin_load_timeout: 60
-file_watch: false
