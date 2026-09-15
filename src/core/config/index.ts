@@ -9,10 +9,20 @@ import chokidar from 'chokidar'
 import EventEmitter from 'node:events'
 import { logger } from '../log.js'
 
+/** id 对齐到 log_align 宽度（此处自带实现：util 依赖 config，反向 import 会成环） */
+function makeId(id: string) {
+  const align: string | undefined = (globalThis as any).cfg?.bot?.log_align
+  if (!align) return id
+  const pad = (align.length - id.length) / 2
+  if (pad > 0) return `${' '.repeat(Math.ceil(pad))}${id}${' '.repeat(Math.floor(pad))}`
+  if (pad < 0) return `${id.slice(0, align.length - 1)}.`
+  return id
+}
+
 /** 配置文件读取错误时安全记录（Bot 可能尚未创建） */
 function safeLog(msg: any) {
   try {
-    logger.warn(msg)
+    logger.warn(logger.blue(`[${makeId('Config')}]`), msg)
   } catch {
     /* ignore */
   }
@@ -257,7 +267,7 @@ class Cfg {
         // package.json 相关内容可能随配置变化
         if (name === 'jiuli') this._package = undefined
         if (typeof (globalThis as any).Bot !== 'object') return
-        logger.mark(`[修改配置文件][${type}][${name}]`)
+        logger.mark(logger.blue(`[${makeId('Config')}]`), `修改配置文件 [${type}] [${name}]`)
         const hook = `change_${name}`
         if (hook in this) (this as any)[hook]()
       }, 5000)

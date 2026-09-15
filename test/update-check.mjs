@@ -199,7 +199,13 @@ check(
   wrong.length ? wrong.map(([m, f]) => `${m} → ${route(m)}（应 ${f}）`).join('; ') : cases.map(c => c[0]).join(' '),
 )
 
-fs.rmSync(TMP, { recursive: true, force: true })
+/** 先离开临时目录：Windows 下删不掉进程当前所在的目录 */
+process.chdir(ROOT)
+try {
+  fs.rmSync(TMP, { recursive: true, force: true })
+} catch (err) {
+  console.log(`（临时目录清理失败，可手动删除：${TMP}）`)
+}
 const pass = results.filter(Boolean).length
 console.log(`\n=== 更新插件测试：${pass}/${results.length} 通过 ===`)
 process.exit(pass === results.length ? 0 : 1)

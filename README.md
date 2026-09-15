@@ -51,7 +51,7 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 | 目录 | 归属 | 内容 |
 |---|---|---|
 | `plugins/example/` | **你自己** | 平铺 js 插件，增删改即时热重载 |
-| `plugins/system/` | 框架 | 帮助 / 状态 / 诊断 / 版本 / 设置主人 / 词条 / 撤回 / 重载 / 重启 / 关机 / 日志 / 更新 / 上下线 |
+| `plugins/system/` | 框架 | 帮助 / 状态 / 诊断 / 版本 / 设置主人（含新增·删除主人）/ 词条 / 撤回 / 重载 / 重启 / 关机 / 日志 / 更新 / 上下线 |
 | `plugins/adapter/` | 框架 | `stdin.js` 终端交互、`mock.js` 无协议端调试 |
 | `plugins/demo/` | 框架 | 三种插件写法与渲染示例（`#渲染测试`） |
 | `plugins/<其它>/` | 第三方 | clone 来的插件，不入库，依赖由 pnpm workspace 安装 |
@@ -61,18 +61,23 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 ## 日志
 
 ```
-──────── JiuLi ────────
-JiuLi v0.1.0 启动中…
+[  JiuLi  ] ──────── 启动中 ────────
+[  JiuLi  ] v0.1.0 · 插件可见的框架标识 JiuLi v3.1.3
+[  Redis  ] 已连接 redis://127.0.0.1:6379/0
 [  Server ] 启动 HTTP 服务器 http://[::]:1721
-[  Plugin ] 插件 26 个 · 规则 47 条 · 事件监听 8 个 · 定时任务 2 个 · 用时 1秒768
+[  Render ] 渲染后端 puppeteer 已就绪 · 类型 image · 支持 script 是
+[  Plugin ] 插件 110 个 · 规则 377 条 · 事件监听 28 个 · 定时任务 4 个 · 用时 14秒345
 [ Adapter ] 适配器 3 个 · Mock(QQ) · 标准输入(stdin) · QQBot(QQBot)
-──────── 启动完成 · 总耗时 3秒234 ────────
+[  JiuLi  ] ──────── 启动完成 · 总耗时 15秒021 ────────
 
 [   Msg   ] 收 ◀ 群 测试群(888777666) · 小明(10001) · 主人 · #状态
 [  Plugin ] 中 ▶ 状态统计 <system/status.js> · 规则 /^#(状态|统计)/ · 方法 status · 优先级 5000
 [   Msg   ] 发 ▶ 群 测试群(888777666) · 转发(2节点) · 由 状态统计 · 0ms
 [  Plugin ] 完成 状态统计 · 73ms
 ```
+
+左侧 `[  xxx  ]` 是日志 id 列，宽度由 `bot.yaml → log_align` 决定（默认 `"  JiuLi  "`），
+未指定 id 的框架级日志会显示 `[  JiuLi  ]`。
 
 - 收发消息内容、命中插件与正则、耗时都会记录（`bot.yaml → log_msg: false` 可关）
 - 指令命中规则但插件没响应时会补一句提示（`bot.yaml → no_handler_tip: false` 可关）

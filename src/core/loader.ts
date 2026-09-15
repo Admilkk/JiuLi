@@ -261,7 +261,8 @@ class PluginsLoader {
       plugin: instance,
       class: p,
       key: file.name,
-      name: instance.name,
+      /** 旧插件可能没写 name，退化为类名 / 文件名，避免日志出现空名字 */
+      name: instance.name || p.name || file.name,
       priority: instance.priority,
       namespace,
     })
@@ -459,13 +460,9 @@ class PluginsLoader {
                 )
                 continue
               }
-              const resText =
-                res === undefined || res === true
-                  ? ''
-                  : ` · 返回 ${typeof res === 'object' ? 'object' : util.truncate(res, 16)}`
               util.makeLog(
                 v.log === false ? 'debug' : 'mark',
-                `完成 ${logger.green.bold(i.name)} · ${util.colorCost(cost)}${resText}`,
+                `完成 ${logger.green.bold(i.name)} · ${util.colorCost(cost)}`,
                 'Plugin',
               )
             } catch (err) {

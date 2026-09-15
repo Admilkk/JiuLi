@@ -2,6 +2,7 @@
 import type { PluginEntry, PluginMetric } from './types.js'
 import cfg from './config/index.js'
 import { logger } from './log.js'
+import util from './util.js'
 
 class Metrics {
   map = new Map<string, PluginMetric>()
@@ -28,7 +29,7 @@ class Metrics {
       // 同一插件 60s 内只告警一次
       if (Date.now() - last > 60000) {
         this.warned.set(key, Date.now())
-        logger.warn(`[慢插件] ${entry.name}(${key}) 本次耗时 ${ms}ms，超过阈值 ${threshold}ms`)
+        util.makeLog('warn', `${entry.name}(${key}) 本次耗时 ${ms}ms，超过阈值 ${threshold}ms`, '慢插件')
       }
     }
   }

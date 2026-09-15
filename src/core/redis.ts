@@ -63,7 +63,7 @@ class MemoryRedis {
   private unsupported(cmd: string) {
     if (!this.warned.has(cmd)) {
       this.warned.add(cmd)
-      logger.warn(`[Redis] 内存降级模式暂不支持命令 ${cmd}，返回 null`)
+      util.makeLog('warn', `内存降级模式暂不支持命令 ${cmd}，返回 null`, 'Redis')
     }
     return null
   }
@@ -416,7 +416,7 @@ export class Redis {
         const id = Date.now().toString(36)
         if ((await this.redis.ping(id)) === id) break
       } catch (err) {
-        logger.error(err as any)
+        util.makeLog('error', err, 'Redis')
       }
       await util.sleep(1000)
     }
@@ -428,7 +428,7 @@ export class Redis {
   async start(): Promise<any> {
     const host = this.opts.socket.host
     if (!['127.0.0.1', 'localhost', '::1'].includes(String(host))) {
-      logger.error(`[Redis] 连接 ${host} 失败，请确认连接地址正确`)
+      util.makeLog('error', `连接 ${host} 失败，请确认连接地址正确`, 'Redis')
       if (this.exit) return (globalThis as any).Bot?.exit?.()
       return false
     }
@@ -436,15 +436,15 @@ export class Redis {
     const cmd = String(cfg.redis.path || 'redis-server')
     const pathOk = await util.cmdPath(cmd.split(' ')[0])
     if (pathOk) {
-      logger.info(`[Redis] 正在启动 ${cmd} --port ${this.opts.socket.port}`)
+      util.makeLog('info', `正在启动 ${cmd} --port ${this.opts.socket.port}`, 'Redis')
       const proc: any = spawn(cmd, ['--port', String(this.opts.socket.port)], { shell: true })
         .on('error', err => {
-          logger.error(['[Redis] 启动错误', err] as any)
+          util.makeLog('error', ['启动错误', err], 'Redis')
           proc.exit = true
         })
         .on('exit', () => (proc.exit = true))
-      proc.stdout?.on('data', (data: any) => logger.info(String(data).trim() as any))
-      proc.stderr?.on('data', (data: any) => logger.error(String(data).trim() as any))
+      proc.stdout?.on('data', (data: any) => util.makeLog('info', String(data).trim(), 'Redis'))
+      proc.stderr?.on('data', (data: any) => util.makeLog('error', String(data).trim(), 'Redis'))
 
       for (let i = 0; i < 15; i++) {
         await util.sleep(1000)
@@ -458,13 +458,13 @@ export class Redis {
       proc.kill()
     }
 
-    logger.error(`[Redis] 连接失败：${this.err?.message || this.err}` as any)
+    util.makeLog('error', `连接失败：${this.err?.message || this.err}`, 'Redis')
     if (this.exit) return (globalThis as any).Bot?.exit?.()
     return false
   }
 
   onerror = async (err: any) => {
-    logger.error(['[Redis]', err] as any)
+    util.makeLog('error', err, 'Redis')
     await this.redis.disconnect().catch(() => {})
     return this.connect()
   }
@@ -473,7 +473,7 @@ export class Redis {
 /** 注入全局 redis */
 export async function redisInit(): Promise<any> {
   if (process.env.JIULI_REDIS === 'memory') {
-    logger.warn('[Redis] JIULI_REDIS=memory，使用内存实现')
+    util.makeLog('warn', 'JIULI_REDIS=memory，使用内存实现', 'Redis')
     return ((globalThis as any).redis = new MemoryRedis())
   }
 
@@ -489,16 +489,16 @@ export async function redisInit(): Promise<any> {
   ).connect()
 
   if (client) {
-    logger.info(`[Redis] 已连接 redis://${rc.host}:${rc.port}/${rc.db || 0}` as any)
+    util.makeLog('info', `已连接 redis://${rc.host}:${rc.port}/${rc.db || 0}`, 'Redis')
     return ((globalThis as any).redis = client)
   }
 
   if (cfg.getCompat().redis_fallback ?? cfg.getAllCfg('jiuli').redis_fallback ?? true) {
-    logger.warn('[Redis] 使用内存降级实现，数据重启后丢失（config/jiuli.yaml → redis_fallback）')
+    util.makeLog('warn', '使用内存降级实现，数据重启后丢失（config/config/jiuli.yaml → redis_fallback）', 'Redis')
     return ((globalThis as any).redis = new MemoryRedis())
   }
 
-  logger.error('[Redis] 无法连接且未开启内存降级，进程退出' as any)
+  util.makeLog('error', '无法连接且未开启内存降级，进程退出', 'Redis')
   return (globalThis as any).Bot?.exit?.()
 }
 

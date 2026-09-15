@@ -161,8 +161,8 @@ if (legacy) {
   emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#状态' })
   await sleep(1400) // 该用例要跑 redis 统计，留足时间避免抢跑
   check(
-    '内置 #状态（master + makeForwardArray）',
-    json().includes('JiuLi v') && json().includes('运行时间') && json().includes('插件加载用时'),
+    '内置 #状态（master：运行信息 + 收发统计）',
+    json().includes('JiuLi v') && json().includes('运行时间') && json().includes('消息 总计'),
     json().slice(0, 100),
   )
 } else skip('内置 #状态（master + makeForwardArray）')
@@ -224,6 +224,48 @@ check('内置 #设置主人（错误验证码 + 上下文结束）', json().incl
       json().slice(0, 60),
     )
   }
+}
+
+/* ---------- 4a3. 新增/删除主人（@ 或 QQ 号） ---------- */
+{
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#新增主人 23456789' })
+  await sleep(500)
+  let cfgText = fs.readFileSync('test/.tmp-config/other.yaml', 'utf8')
+  check(
+    '#新增主人（写 QQ 号）',
+    json().includes('[23456789] 已被设置为主人') && cfgText.includes('23456789'),
+    json().slice(0, 60),
+  )
+
+  clear()
+  emit({
+    type: 'message',
+    group_id: '888777666',
+    user_id: '10001',
+    msg: '#新增主人',
+    message: [{ type: 'at', qq: '34567890' }, { type: 'text', text: ' #新增主人' }],
+  })
+  await sleep(500)
+  cfgText = fs.readFileSync('test/.tmp-config/other.yaml', 'utf8')
+  check('#新增主人（@ 用户）', json().includes('[34567890] 已被设置为主人') && cfgText.includes('34567890'), json().slice(0, 60))
+
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#删除主人 23456789' })
+  await sleep(500)
+  cfgText = fs.readFileSync('test/.tmp-config/other.yaml', 'utf8')
+  check('#删除主人', json().includes('[23456789] 已被移除主人') && !cfgText.includes('23456789'), json().slice(0, 60))
+
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#新增主人' })
+  await sleep(400)
+  check('#新增主人（没带 QQ 时的提示）', json().includes('请 @用户 或带上 QQ 号'), json().slice(0, 40))
+
+  /** 还原测试用主人配置 */
+  fs.writeFileSync(
+    'test/.tmp-config/other.yaml',
+    ['master:', '  - "mock:10001"', ''].join(String.fromCharCode(10)),
+  )
 }
 
 /* ---------- 4b. 旧插件上下文会话（主动复读.js） ---------- */

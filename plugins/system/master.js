@@ -8,19 +8,22 @@ const code = {}
 const configFile = () => `${cfg.userDir}other.yaml`.replace(/\\/g, '/').replace(/\/+/g, '/')
 
 /**
- * #设置主人
- * 非主人发送 #设置主人 获取验证码（日志中打印），在 120 秒内回复验证码即可将自己设为主人
+ * #设置主人                   非主人取验证码（同时打到日志），120 秒内回复验证码即成为主人
+ * #新增主人 [@用户|QQ号]      主人直接增删，改动写入 config/config/other.yaml 并即时生效
+ * #删除主人 [@用户|QQ号]
  */
 export default class Master extends JiuLiPlugin {
   constructor() {
     super({
       name: '设置主人',
-      dsc: '设置主人',
+      dsc: '#设置主人 #新增主人 #删除主人',
       event: 'message',
       priority: -Infinity,
       rule: [
         { reg: '^#设置主人验证码$', fnc: 'code', permission: 'master' },
         { reg: '^#设置主人$', fnc: 'master' },
+        { reg: '^#(新增|添加)主人', fnc: 'addMaster', permission: 'master' },
+        { reg: '^#(删除|移除)主人', fnc: 'removeMaster', permission: 'master' },
       ],
     })
   }
@@ -31,10 +34,10 @@ export default class Master extends JiuLiPlugin {
     return this.reply(msg.trim() || '暂无验证码', true)
   }
 
-  /** 写入用户配置；文件/目录被误删时自愈重建 */
-  async edit(yamlFile, key, value) {
-    const dir = yamlFile.replace(/[/\\][^/\\]+$/, '')
-    await Bot.mkdir(dir)
+  /** 写入用户配置；文件/目录被误删时自愈重建；remove 为真时从列表移除 */
+  async edit(key, value, remove = false) {
+    const yamlFile = configFile()
+    await Bot.mkdir(yamlFile.replace(/[/\\][^/\\]+$/, ''))
 
     let text = ''
     try {
@@ -44,7 +47,7 @@ export default class Master extends JiuLiPlugin {
       /** 文件缺失：从默认配置重建一份，保证后续解析有完整结构 */
       try {
         text = await fs.readFile(`config/default_config/${yamlFile.split(/[/\\]/).pop()}`, 'utf8')
-        logger.mark(`配置文件 ${yamlFile} 缺失，已从默认配置重建`)
+        Bot.makeLog('mark', `配置文件 ${yamlFile} 缺失，已从默认配置重建`, 'JiuLi')
       } catch {
         text = ''
       }
@@ -52,19 +55,64 @@ export default class Master extends JiuLiPlugin {
 
     const doc = YAML.parseDocument(text)
     const values = doc.get(key)
-    if (values) {
-      if (values.items.some(item => item.value == value)) return
+    if (remove) {
+      if (values) values.items = values.items.filter(i => String(i.value) !== String(value))
+    } else if (values) {
+      if (values.items.some(i => String(i.value) === String(value))) return
       values.add(value)
     } else doc.set(key, [value])
-    return fs.writeFile(yamlFile, doc.toString(), 'utf8')
+
+    await fs.writeFile(yamlFile, doc.toString(), 'utf8')
+    /** 让运行中的实例立刻读到新的主人列表 */
+    cfg.invalidate('other')
+  }
+
+  /** @用户 或消息里直接写 QQ 号 */
+  getTargetQQ() {
+    if (this.e.at) return String(this.e.at)
+    const qq = String(this.e.msg).replace(/^#?(新增|添加|删除|移除)主人/, '').trim()
+    return /^\d{5,}$/.test(qq) ? qq : null
+  }
+
+  async addMaster() {
+    const qq = this.getTargetQQ()
+    if (!qq) return this.reply('请 @用户 或带上 QQ 号', true)
+    try {
+      await this.edit('masterQQ', qq)
+      await this.edit('master', `${this.e.self_id}:${qq}`)
+    } catch (err) {
+      return this.reply(`写入配置失败：${err.message || err}`, true)
+    }
+    return this.reply(`[${qq}] 已被设置为主人`, true)
+  }
+
+  async removeMaster() {
+    const qq = this.getTargetQQ()
+    if (!qq) return this.reply('请 @用户 或带上 QQ 号', true)
+
+    /** 至少留一个主人，避免把自己锁在门外 */
+    const rest = (cfg.getOther()?.master || []).filter(
+      i => String(i) !== `${this.e.self_id}:${qq}` && String(i) !== String(qq),
+    )
+    if (!rest.length) return this.reply('至少要保留一个主人', true)
+
+    try {
+      await this.edit('masterQQ', qq, true)
+      await this.edit('master', `${this.e.self_id}:${qq}`, true)
+    } catch (err) {
+      return this.reply(`写入配置失败：${err.message || err}`, true)
+    }
+    return this.reply(`[${qq}] 已被移除主人`, true)
   }
 
   master() {
     if (this.e.isMaster) return this.reply(`[${this.e.user_id}] 已经为主人`, true)
 
     code[`${this.e.self_id}:${this.e.user_id}`] = ulid()
-    logger.mark(
+    Bot.makeLog(
+      'mark',
       `${logger.cyan(`[${this.e.user_id}]`)} 设置主人验证码 ${logger.green(code[`${this.e.self_id}:${this.e.user_id}`])}`,
+      'JiuLi',
     )
     this.setContext('verify')
     return this.reply(`[${this.e.user_id}] 请输入验证码`, true)
@@ -78,8 +126,8 @@ export default class Master extends JiuLiPlugin {
     this.finish('verify')
     if (verified) {
       try {
-        await this.edit(configFile(), 'masterQQ', this.e.user_id)
-        await this.edit(configFile(), 'master', `${this.e.self_id}:${this.e.user_id}`)
+        await this.edit('masterQQ', this.e.user_id)
+        await this.edit('master', `${this.e.self_id}:${this.e.user_id}`)
       } catch (err) {
         logger.error('写入主人配置失败', err)
         return this.reply(`写入配置失败：${err.message || err}`, true)

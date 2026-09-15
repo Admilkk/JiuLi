@@ -34,7 +34,7 @@ export class RendererLoader {
     if (this.loaded) return this
     this.loaded = true
     if (!fs.existsSync(this.dir)) {
-      logger.warn('[Renderer] 未找到 renderers 目录，渲染功能不可用')
+      util.makeLog('warn', '未找到 renderers 目录，渲染功能不可用', 'Render')
       return this
     }
 
@@ -52,7 +52,7 @@ export class RendererLoader {
         const rendererCfg = fs.existsSync(configFile) ? yaml.parse(fs.readFileSync(configFile, 'utf8')) : {}
         const renderer = rendererFn(rendererCfg)
         if (!renderer?.id || !renderer?.type || typeof renderer.render !== 'function') {
-          logger.warn(`渲染后端 ${renderer?.id || name} 不可用`)
+          util.makeLog('warn', `渲染后端 ${renderer?.id || name} 不可用`, 'Render')
           continue
         }
         this.renderers.set(renderer.id, renderer)

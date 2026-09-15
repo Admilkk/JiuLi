@@ -25,11 +25,11 @@ function merge(target: any, source: any): any {
 /** 监听配置文件变化，需绑定 { config, configFile } 作为 this */
 export async function watcher(this: any) {
   try {
-    logger.debug('配置文件', this.configFile, '发生变化')
+    util.makeLog('debug', ['配置文件', this.configFile, '发生变化'], 'Config')
     const configData = YAML.parse(await fs.readFile(this.configFile, 'utf8'))
     merge(this.config, configData)
   } catch (err) {
-    logger.error('配置文件', this.configFile, '读取失败', err)
+    util.makeLog('error', ['配置文件', this.configFile, '读取失败', err], 'Config')
   }
 }
 
@@ -51,7 +51,7 @@ export default async function makeConfig(name: string, config: any = {}, keep: a
     configData = YAML.parse(await fs.readFile(configFile, 'utf8'))
     merge(config, configData)
   } catch (err) {
-    logger.debug('配置文件', configFile, '读取失败', err)
+    util.makeLog('debug', ['配置文件', configFile, '读取失败', err], 'Config')
   }
   merge(config, keep)
 

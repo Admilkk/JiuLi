@@ -1,5 +1,6 @@
 /** 跨插件 handler 总线（兼容云崽 Handler） */
 import { logger } from './log.js'
+import util from './util.js'
 
 interface HandlerItem {
   priority: number
@@ -17,7 +18,7 @@ const Handler = {
     const key = cfg.key || cfg.event
     if (!key || !fn) return
     Handler.del(ns, key)
-    logger.mark(`[Handler] 注册 · ${logger.cyan(key)} · 来自 ${ns} · 优先级 ${priority}`)
+    util.makeLog('mark', `注册 · ${logger.cyan(key)} · 来自 ${ns} · 优先级 ${priority}`, 'Handler')
     events[key] = events[key] || []
     events[key].push({ priority, fn, ns, self, key })
     events[key].sort((a, b) => a.priority - b.priority)
@@ -31,7 +32,7 @@ const Handler = {
     if (!events[key]) return
     const before = events[key].length
     events[key] = events[key].filter(handler => handler.ns !== ns)
-    if (events[key].length !== before) logger.debug(`[Handler] 移除 · ${key} · 来自 ${ns}`)
+    if (events[key].length !== before) util.makeLog('debug', `移除 · ${key} · 来自 ${ns}`, 'Handler')
     if (!events[key].length) delete events[key]
   },
 
@@ -44,13 +45,13 @@ const Handler = {
     for (const obj of events[key] ?? []) {
       let done = true
       const reject = (msg = '') => {
-        if (msg) logger.mark(`[Handler] 被拒绝 · ${key} · 来自 ${obj.ns} · ${msg}`)
+        if (msg) util.makeLog('mark', `被拒绝 · ${key} · 来自 ${obj.ns} · ${msg}`, 'Handler')
         done = false
       }
       const start = Date.now()
       ret = await obj.fn.call(obj.self, e, args, reject)
       if (done && !allHandler) {
-        logger.mark(`[Handler] 完成 · ${logger.cyan(key)} · 来自 ${obj.ns} · ${Date.now() - start}ms`)
+        util.makeLog('mark', `完成 · ${logger.cyan(key)} · 来自 ${obj.ns} · ${Date.now() - start}ms`, 'Handler')
         return ret
       }
     }

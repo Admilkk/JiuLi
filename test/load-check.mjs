@@ -28,8 +28,19 @@ await injectGlobals(bot)
 await redisInit()
 
 const loader = (await import('../lib/core/loader.js')).default
+
+/** 插件加载错误走 console.error，这里截获用于统计（语法错误、缺依赖等） */
+const errors = []
+const origError = console.error
+console.error = (...args) => {
+  const line = args.map(String).join(' ')
+  if (line.includes('插件加载错误')) errors.push(line.replace(/\u001b\[[0-9;]*m/g, ''))
+  origError(...args)
+}
+
 const startAt = Date.now()
 await loader.load()
+console.error = origError
 
 const rules = loader.priority.reduce((n, i) => n + (i.plugin.rule?.length || 0), 0)
 const names = loader.priority.map(i => i.name || i.key)
@@ -41,5 +52,9 @@ const slow = Object.entries(loader.load_time)
   .slice(0, 5)
   .map(([k, v]) => `${k} ${v}ms`)
 console.log(`最慢：${slow.join(' · ')}`)
+if (errors.length) {
+  console.log(`\n❌ 加载失败的插件 ${errors.length} 个：`)
+  for (const i of errors) console.log(`  ${i.slice(0, 160)}`)
+}
 if (!full) fs.rmSync('test/.tmp-loadcheck', { recursive: true, force: true })
-process.exit(0)
+process.exit(errors.length ? 1 : 0)

@@ -4,6 +4,7 @@
 import fs from 'node:fs'
 import cfg from './config/index.js'
 import { logger, setLog, setLogDir } from './log.js'
+import util from './util.js'
 import { redisInit } from './redis.js'
 import { injectGlobals } from './globals.js'
 
@@ -27,7 +28,7 @@ export async function ensureDirs() {
     try {
       fs.mkdirSync(dir, { recursive: true })
     } catch (err) {
-      logger.warn(`[Start] 创建目录 ${dir} 失败：${err}` as any)
+      util.makeLog('warn', `创建目录 ${dir} 失败：${err}`, 'Start')
     }
 }
 
@@ -63,9 +64,12 @@ export async function start() {
   const bot = new JiuLiBot() as any
   await injectGlobals(bot)
 
-  logger.mark('──────── JiuLi ────────')
-  logger.mark(logger.yellow(`JiuLi v${realVersion} 启动中…`))
-  logger.info(logger.cyan(`插件可见的框架标识：${frameworkName} v${cfg.frameworkVersion}（config/jiuli.yaml → compat）`))
+  bot.makeLog('mark', '──────── 启动中 ────────', 'JiuLi')
+  bot.makeLog(
+    'mark',
+    `v${realVersion} · 插件可见的框架标识 ${logger.cyan(`${frameworkName} v${cfg.frameworkVersion}`)}（config/config/jiuli.yaml → compat）`,
+    'JiuLi',
+  )
 
   // id 用短名，避免被日志对齐截断
   const fatalEvents: Array<[string, string]> = [
@@ -128,18 +132,17 @@ export async function supervise() {
     )
 
     if (stopping) {
-      logger.mark('[守护] 收到退出信号，停止守护进程', 'Daemon')
+      logger.mark('[Daemon] 收到退出信号，停止守护进程')
       break
     }
     if (code === RESTART_CODE) {
       restarts++
-      logger.mark(`[守护] 主进程请求重启 · 第 ${restarts} 次重新拉起（同一终端，不开新窗口）`, 'Daemon')
+      logger.mark(`[Daemon] 主进程请求重启 · 第 ${restarts} 次重新拉起（同一终端，不开新窗口）`)
       await new Promise(r => setTimeout(r, 800))
       continue
     }
     logger.mark(
-      `[守护] 主进程已退出（code=${code ?? signal}），不再重启。如需后台常驻请使用 pnpm start`,
-      'Daemon',
+      `[Daemon] 主进程已退出（code=${code ?? signal}），不再重启。如需后台常驻请使用 pnpm start`,
     )
     break
   }
