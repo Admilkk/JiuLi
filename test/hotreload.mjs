@@ -69,6 +69,12 @@ export default class HotReloadTest extends JiuLiPlugin {
   async hi() {
     return this.reply('热重载版本 ${version}')
   }
+
+  /** 卸载回调：写标记文件，供测试断言「卸载时确实调用了 onUnload」 */
+  async onUnload() {
+    const fs = await import('node:fs')
+    fs.writeFileSync('test/.tmp-onunload', '${version}')
+  }
 }
 `
 
@@ -143,6 +149,11 @@ check('内置 #重载 指令', json().includes('处理完成'), json().replace(/
 fs.rmSync(FILE, { force: true })
 await sleep(4000)
 check('删除 js → 自动卸载', !loader.priority.some(i => i.key === 'example/hot-reload-test.js'))
+check(
+  '卸载时调用插件 onUnload（释放端口/定时器用）',
+  fs.existsSync('test/.tmp-onunload'),
+  fs.existsSync('test/.tmp-onunload') ? `标记内容 ${fs.readFileSync('test/.tmp-onunload', 'utf8')}` : '未调用',
+)
 
 sent.length = 0
 send()
