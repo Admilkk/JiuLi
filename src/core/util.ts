@@ -160,6 +160,41 @@ class Util {
     return Object.assign(Error(msg), ...obj)
   }
 
+  /**
+   * 堆栈里第一处「业务代码」位置：优先 plugins/ 下的帧，找不到就退回第一处非内核帧
+   * （node: 内部 / node_modules / lib/core 都不算），用于把报错落到具体文件行
+   */
+  errorFrame(error: any, keyword = 'plugins/'): string {
+    const stack = String(error?.stack || '')
+    const root = `${process.cwd().replace(/\\/g, '/')}/`
+    const frames: string[] = []
+    for (const line of stack.split('\n')) {
+      const m = line.match(/\(?((?:file:\/\/)?[^()\s]+\.(?:js|mjs|cjs|ts)):(\d+):(\d+)\)?/)
+      if (!m) continue
+      /** Node 的堆栈会把中文/空格路径 percent-encode，先还原再展示 */
+      let file = m[1].replace(/^file:\/\//, '')
+      try {
+        file = decodeURIComponent(file)
+      } catch {
+        /* 非法转义序列：保持原样 */
+      }
+      frames.push(`${file.replace(/\\/g, '/').replace(/^\/([A-Za-z]:)/, '$1')}:${m[2]}:${m[3]}`)
+    }
+    const pick =
+      frames.find(f => f.includes(keyword)) ||
+      frames.find(f => !/^node:|node_modules\/|\/lib\/core\//.test(f))
+    return pick ? pick.replace(root, '') : ''
+  }
+
+  /** 统一的插件报错格式：一行原因 + 插件内出错位置 + 可选提示（完整堆栈由调用方按 debug 输出） */
+  describeError(error: any, title: string, hint = ''): string {
+    let text = `${title} · ${logger.red(String(error?.message || error))}`
+    const frame = this.errorFrame(error)
+    if (frame) text += `\n        ${logger.gray(frame)}`
+    if (hint) text += `\n        ${logger.gray(hint)}`
+    return text
+  }
+
   async fsStat(file: string, opts?: any) {
     try {
       return await fs.stat(file, opts)

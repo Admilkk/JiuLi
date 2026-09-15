@@ -79,7 +79,12 @@ export async function start() {
   for (const [event, id] of fatalEvents)
     process.on(event, (e: any) => {
       try {
-        bot.makeLog('error', e, id)
+        /** 未捕获错误同样只给一行原因；堆栈里有插件代码就指出来，完整堆栈留给 debug */
+        const frame = util.errorFrame(e)
+        const msg = `${String(e?.message || e)}${frame ? `
+        疑似来自 ${frame}` : ''}`
+        bot.makeLog('error', msg, id)
+        bot.makeLog('debug', [event, e], id)
       } catch (err) {
         console.error(event, e, err)
         process.exit()

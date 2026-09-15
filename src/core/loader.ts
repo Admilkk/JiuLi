@@ -540,7 +540,16 @@ class PluginsLoader {
                 'Plugin',
               )
             } catch (err) {
-              util.makeLog('error', [`${i.name} <${i.key}> · 执行出错`, err], 'Plugin')
+              util.makeLog(
+                'error',
+                util.describeError(
+                  err,
+                  `执行出错 ${logger.green.bold(i.name)} <${i.key}>`,
+                  '插件自身的问题：本次指令未完成，其他插件与启动都不受影响（完整堆栈：log_level: debug）',
+                ),
+                'Plugin',
+              )
+              util.makeLog('debug', [`${i.name} 出错堆栈`, err], 'Plugin')
             }
           return
         }
@@ -597,7 +606,16 @@ class PluginsLoader {
           return false
         }
       } catch (err) {
-        util.makeLog('error', [`${entry.name} <${entry.key}> · ${name} 出错`, err], 'Plugin')
+        util.makeLog(
+          'error',
+          util.describeError(
+            err,
+            `${name} 出错 ${logger.green.bold(entry.name)} <${entry.key}>`,
+            '插件自身的问题：本次事件的分发已跳过该插件，其他插件不受影响',
+          ),
+          'Plugin',
+        )
+        util.makeLog('debug', [`${entry.name} 出错堆栈`, err], 'Plugin')
       }
     }
     return true
@@ -867,7 +885,8 @@ class PluginsLoader {
       await fn()
       util.makeLog(i.log === false ? 'debug' : 'mark', `${name}${logger.green(`[完成${util.getTimeDiff(start_time)}]`)}`, false)
     } catch (err) {
-      util.makeLog('error', [name, err], false)
+      util.makeLog('error', util.describeError(err, `定时任务出错 ${logger.green.bold(name)}`, '该任务的这次执行中断；完整堆栈见 debug 日志'), 'Task')
+      util.makeLog('debug', [`${name} 任务堆栈`, err], 'Task')
     }
   }
 
@@ -972,7 +991,8 @@ class PluginsLoader {
       try {
         await initInstance.onUnload()
       } catch (err) {
-        util.makeLog('error', [`${key} · onUnload 出错`, err], 'Plugin')
+        util.makeLog('error', util.describeError(err, `onUnload 出错 ${logger.green.bold(key)}`, '清理资源的代码有问题；热重载仍会继续'), 'Plugin')
+        util.makeLog('debug', [`${key} onUnload 堆栈`, err], 'Plugin')
       }
     this.initInstances.delete(key)
 
@@ -1042,7 +1062,8 @@ class PluginsLoader {
       this.createTask()
       return success
     } catch (err) {
-      util.makeLog('error', [`插件加载错误 ${logger.red(key)}`, err], 'Plugin')
+      util.makeLog('error', this.describeLoadError(err, { name: key }).text, 'Plugin')
+      util.makeLog('debug', [`${key} 重载失败详情`, err], 'Plugin')
       return false
     }
   }
