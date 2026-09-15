@@ -318,7 +318,12 @@ class PluginsLoader {
       }
     }
 
-    return { text: head + logger.yellow(msg), pkg: false }
+    /** 其它错误：给出原因，能定位到插件内某一行就带上 */
+    const frame = util.errorFrame(error)
+    return {
+      text: head + logger.yellow(msg) + (frame ? `\n        ${logger.gray(frame)}` : ''),
+      pkg: false,
+    }
   }
 
   async importPlugin(file: { name: string; path: string }, packageErr?: any[]) {
