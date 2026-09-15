@@ -459,13 +459,40 @@ export class Redis {
     }
 
     util.makeLog('error', `连接失败：${this.err?.message || this.err}`, 'Redis')
+    util.makeLog(
+      'error',
+      `        本机没有可用的 Redis：装一个（apt install redis-server / 或用 redis.yaml → path 指定路径），` +
+        `或把 config/jiuli.yaml → redis_fallback 设为 true 用内存实现（数据重启后丢失）`,
+      'Redis',
+    )
     if (this.exit) return (globalThis as any).Bot?.exit?.()
     return false
   }
 
+  /** 连续失败次数与上次报错时间：Redis 挂掉时避免每秒刷屏 */
+  private errCount = 0
+  private errAt = 0
+
   onerror = async (err: any) => {
-    util.makeLog('error', err, 'Redis')
+    const now = Date.now()
+    this.errCount++
+    /** 每 10 秒最多报一次，且带上累计次数 */
+    if (now - this.errAt > 10000) {
+      this.errAt = now
+      util.makeLog(
+        'error',
+        `连接中断（第 ${this.errCount} 次）：${err?.message || err}\n` +
+          `        Redis 可能已停止；重启前数据操作会失败，插件自建的 Redis 连接也会报错`,
+        'Redis',
+      )
+    }
     await this.redis.disconnect().catch(() => {})
+    /** 反复连不上且允许降级时，换成内存实现，避免一直重试 */
+    if (this.errCount >= 3 && (cfg.getCompat().redis_fallback ?? cfg.getAllCfg('jiuli').redis_fallback ?? true)) {
+      util.makeLog('warn', 'Redis 多次重连失败，已切换为内存实现（数据重启后丢失）', 'Redis')
+      ;(globalThis as any).redis = new MemoryRedis()
+      return
+    }
     return this.connect()
   }
 }
