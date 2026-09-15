@@ -43,7 +43,7 @@ try {
 
 fs.writeFileSync(
   'test/.tmp-broken-cfg/bot.yaml',
-  'log_level: info\nplugin_load_timeout: 20\nfile_watch: false\nlog_msg: true\n',
+  'log_level: info\nplugin_load_timeout: 8\nfile_watch: false\nlog_msg: true\n',
 )
 fs.writeFileSync('test/.tmp-broken-cfg/other.yaml', 'master:\n  - "mock:10001"\n')
 
@@ -53,6 +53,7 @@ const BAD_IMPORT = path.join(PLUGINS_DIR, 'example', '坏引用.js')
 const BAD_PKG = path.join(PLUGINS_DIR, 'example', '缺依赖.js')
 const GOOD = path.join(PLUGINS_DIR, 'example', '好插件.js')
 const BOOM = path.join(PLUGINS_DIR, 'example', '会报错.js')
+const HUNG = path.join(PLUGINS_DIR, 'example', '卡死.js')
 
 fs.writeFileSync(BAD_SYNTAX, 'import { JiuLiPlugin } from \'jiuli\'\nexport default class A extends JiuLiPlugin {\n') // 故意未闭合
 fs.writeFileSync(BAD_IMPORT, 'import HL from \'../hl-plugin/model/HL.js\'\nexport default class B {}\n')
@@ -76,6 +77,34 @@ export default class Boom extends JiuLiPlugin {
     super({ name: '会报错的插件', dsc: 'boom', rule: [{ reg: '^#报错$', fnc: 'boom' }] })
   }
   async boom() { throw new Error('这是插件自己的 bug') }
+}
+`,
+)
+
+/** 顶层 await 永不结束：模拟「加载卡住」的插件 */
+fs.writeFileSync(
+  HUNG,
+  `import { JiuLiPlugin } from 'jiuli'
+await new Promise(() => {})
+export default class Hung extends JiuLiPlugin {
+  constructor() {
+    super({ name: '卡死的插件', dsc: 'hung' })
+  }
+}
+`,
+)
+
+/** 比超时更晚才就绪：验证「迟到就绪会自动补进分发」 */
+const SLOW = path.join(PLUGINS_DIR, 'example', '慢插件.js')
+fs.writeFileSync(
+  SLOW,
+  `import { JiuLiPlugin } from 'jiuli'
+await new Promise(r => setTimeout(r, 12000))
+export default class Slow extends JiuLiPlugin {
+  constructor() {
+    super({ name: '慢插件', dsc: 'slow', rule: [{ reg: '^#慢插件$', fnc: 'hi' }] })
+  }
+  async hi() { return this.reply('慢插件上线') }
 }
 `,
 )
@@ -135,6 +164,37 @@ check(
   lines.find(l => l.includes('pnpm '))?.slice(0, 80) || '（无提示）',
 )
 check('加载期不再刷屏 Node 堆栈', !errLines.some(l => /at (ModuleLoader|ModuleJob|finalizeResolution)/.test(l)))
+
+/* ---------- A2. 插件一直不就绪：不能默默卡住 ---------- */
+check(
+  '等待期间有进度输出（点名还没就绪的插件）',
+  lines.some(l => l.includes('个插件就绪') && l.includes('卡死.js')),
+  lines.find(l => l.includes('个插件就绪'))?.replace(/\s+/g, ' ').slice(0, 120) || '（没有任何进度输出）',
+)
+check(
+  '超时后给出原因与后续做法',
+  lines.some(l => l.includes('插件加载超时') && l.includes('卡死.js') && l.includes('#重载')),
+  lines.find(l => l.includes('插件加载超时'))?.replace(/\s+/g, ' ').slice(0, 110) || '（没有超时提示）',
+)
+check('卡死插件不会拖住启动（超时后照常继续）', loaded === 'ok' && Date.now() - startAt < 30000)
+
+/* ---------- A3. 迟到就绪（超时后才 import 完）自动补进分发 ---------- */
+{
+  let attached = false
+  for (let i = 0; i < 40; i++) {
+    if (loader.priority.some(i => i.name === '慢插件')) {
+      attached = true
+      break
+    }
+    await new Promise(r => setTimeout(r, 500))
+  }
+  check('超时后才就绪的插件会自动加入分发', attached, attached ? '' : '（一直没进来）')
+  check(
+    '迟到就绪有明确日志',
+    lines.some(l => l.includes('迟到就绪')),
+    lines.find(l => l.includes('迟到就绪'))?.replace(/\s+/g, ' ').slice(0, 90) || '（无日志）',
+  )
+}
 
 /* ---------- B. 运行期 ---------- */
 const mock = (bot.adapter || []).find(a => a.name === 'Mock')

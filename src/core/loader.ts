@@ -70,6 +70,8 @@ class PluginsLoader {
   eventIndex = new Map<string, PluginEntry[]>()
   /** 无插件类的文件（适配器/胶水），#重载 时跳过以免重复副作用 */
   inertFiles = new Set<string>()
+  /** 加载阶段是否已结束（用于判断插件是否"迟到就绪"） */
+  loaded = false
   /** 插件 init 实例，卸载时用于回调 onUnload */
   private initInstances = new Map<string, any>()
   groupCD: Record<string, boolean> = {}
@@ -136,18 +138,43 @@ class PluginsLoader {
     const packageErr: any[] = []
     const loadStart = Date.now()
 
+    /** 还没就绪的插件：等待期间每 5 秒报一次进度，避免「卡住了一样没输出」 */
+    const pending = new Set(files.map(f => f.name))
+    const report = setInterval(() => {
+      if (!pending.size) return
+      const list = [...pending]
+      util.makeLog(
+        'warn',
+        `等待 ${logger.yellow(String(list.length))} 个插件就绪（已等 ${Math.round((Date.now() - loadStart) / 1000)} 秒）：` +
+          `${list.slice(0, 6).join(' · ')}${list.length > 6 ? ' …' : ''}\n` +
+          `        仍在加载的插件顶层可能在做重活（读资源 / 连服务 / 等网络）；超过 plugin_load_timeout 会跳过`,
+        'Plugin',
+      )
+    }, 5000)
+    report.unref?.()
+
     await Promise.allSettled(
       files.map(async file => {
         const timeout = cfg.bot.plugin_load_timeout * 1000
+        const started = Date.now()
         if ((await util.sleep(timeout, this.importPlugin(file, packageErr))) === util.sleepTimeout)
           util.makeLog(
             'error',
             `插件加载超时（${timeout / 1000} 秒）${logger.red(file.name)}\n` +
-              `        插件顶层可能在等网络 / 连服务；已跳过，其余插件不受影响（可调 bot.yaml → plugin_load_timeout）`,
+              `        插件顶层可能在等网络 / 连服务；已跳过，其余插件不受影响（可调 bot.yaml → plugin_load_timeout）\n` +
+              `        若它稍后才加载完，发 #重载 让它正式生效`,
             'Plugin',
           )
+        else if (Date.now() - started > 5000)
+          util.makeLog(
+            'warn',
+            `插件就绪较慢 ${logger.yellow(file.name)} · ${util.getTimeDiff(started)}（不影响启动，仅供参考）`,
+            'Plugin',
+          )
+        pending.delete(file.name)
       }),
     )
+    clearInterval(report)
 
     this.packageTips(packageErr)
     this.createTask()
@@ -176,7 +203,24 @@ class PluginsLoader {
     /** 优先级排序 */
     this.priority.sort((a, b) => a.priority - b.priority)
 
+    /** 加载阶段结束：此后才就绪的插件（超时后才 import 完）会被自动补进分发 */
+    this.loaded = true
     this.watchPlugins()
+  }
+
+  /** 迟到的插件（超过 plugin_load_timeout 才就绪）：补进索引与定时任务，避免"下次重载才生效" */
+  private lateAttach(file: { name: string }) {
+    if (!this.loaded || !this.pluginCountMap.get(file.name)) return
+    const mine = this.priority.filter(i => i.key === file.name)
+    if (!mine.length) return
+    this.buildEventIndex()
+    this.priority.sort((a, b) => a.priority - b.priority)
+    this.createTask()
+    util.makeLog(
+      'mark',
+      `${logger.green(mine.map(i => i.name).join(' · '))} ${logger.gray(file.name)} 迟到就绪，已加入分发`,
+      'Plugin',
+    )
   }
 
   buildEventIndex() {
@@ -297,6 +341,8 @@ class PluginsLoader {
       else if (!success) this.inertFiles.delete(file.name)
     }
     this.load_time[file.name] = Date.now() - start_time
+    /** 加载阶段结束后才就绪（超过 plugin_load_timeout）：补进分发，省得用户手动重载 */
+    if (success && this.loaded) this.lateAttach(file)
     return success
   }
 
