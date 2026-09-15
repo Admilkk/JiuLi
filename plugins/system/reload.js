@@ -2,11 +2,12 @@ import { JiuLiPlugin } from 'jiuli'
 import { PluginsLoader } from 'jiuli/core'
 
 /**
- * #重载 / #重载插件 <关键词>
+ * #重载 / #重载 <关键词>
  *
- * 手动重载插件；也会把"磁盘上有、但还没加载"的插件（新 clone 进来的）一起加载
- *   #重载              处理全部插件
- *   #重载 状态         只处理名字/文件里包含「状态」的插件
+ * 设计：改动文件由内核热重载自动生效（plugins/ 下新增/修改/删除 js 都在监听范围内），
+ * 本指令只用于两种情况：
+ *   #重载           补漏：把"磁盘上有、但还没加载"的插件加载进来（如刚 clone 完/刚补装依赖）
+ *   #重载 状态      强制刷新：重载名字匹配的插件（含已加载的，用于 file_watch 关闭或状态异常时）
  */
 export default class Reload extends JiuLiPlugin {
   constructor() {
@@ -23,44 +24,47 @@ export default class Reload extends JiuLiPlugin {
     const keyword = String(this.e.msg).replace(/^#重载(插件)?/, '').trim()
     const e = this.e
 
-    /** 磁盘上的插件文件（用于发现"新加进来但还没加载"的插件） */
+    /** 磁盘上的插件文件（跳过适配器/胶水文件：它们没有插件类，重复导入只会产生副作用） */
     const onDisk = await PluginsLoader.getPlugins()
     const loadedKeys = new Set(PluginsLoader.priority.map(i => i.key))
-    const missing = onDisk.map(f => f.name).filter(name => !loadedKeys.has(name))
+    const missing = onDisk
+      .map(f => f.name)
+      .filter(name => !loadedKeys.has(name) && !PluginsLoader.isInert(name))
     const loaded = [...loadedKeys]
 
-    const targets = keyword ? loaded.filter(k => k.includes(keyword)) : loaded
-    const newOnes = keyword ? missing.filter(k => k.includes(keyword)) : missing
+    /** 无参数：只补漏；带关键词：强制刷新匹配项（含已加载） */
+    const toLoad = keyword ? missing.filter(k => k.includes(keyword)) : missing
+    const toReload = keyword ? loaded.filter(k => k.includes(keyword)) : []
 
-    if (!targets.length && !newOnes.length) return this.reply(`没有匹配「${keyword}」的插件`)
+    if (!toLoad.length && !toReload.length) {
+      return this.reply(
+        keyword
+          ? `没有匹配「${keyword}」的插件`
+          : `插件均已加载（共 ${loaded.length} 个）· 修改文件由热重载自动生效；需要强制刷新请用 #重载 <插件名>`,
+        true,
+      )
+    }
 
     const parts = []
-    if (targets.length) parts.push(`重载 ${targets.length} 个`)
-    if (newOnes.length)
-      parts.push(`新加载 ${newOnes.length} 个（${newOnes.slice(0, 3).join(', ')}${newOnes.length > 3 ? ' …' : ''}）`)
-    await this.reply(`开始${keyword ? `处理匹配「${keyword}」的插件：` : '：'}${parts.join(' · ')}…`, true)
+    if (toLoad.length) parts.push(`新加载 ${toLoad.length} 个（${toLoad.slice(0, 3).join(', ')}${toLoad.length > 3 ? ' …' : ''}）`)
+    if (toReload.length) parts.push(`重载 ${toReload.length} 个`)
+    await this.reply(`开始${keyword ? `处理「${keyword}」：` : '：'}${parts.join(' · ')}…`, true)
 
     /** 等回复发出去再动手，避免卸载掉正在处理这条消息的插件 */
     setTimeout(async () => {
       const start = Date.now()
       let ok = 0
       const failed = []
-      /** 先加载新插件 */
-      for (const key of newOnes) {
-        const before = PluginsLoader.pluginCount
-        await PluginsLoader.reloadKey(key)
-        if (PluginsLoader.pluginCount > before) ok++
+
+      for (const key of toLoad) {
+        if (await PluginsLoader.reloadKey(key)) ok++
         else failed.push(key)
       }
-      /** 再重载已加载的 */
-      for (const key of targets) {
-        const before = PluginsLoader.priority.filter(i => i.key === key).length
-        const countBefore = PluginsLoader.pluginCount
-        await PluginsLoader.changePlugin(key)
-        const after = PluginsLoader.priority.filter(i => i.key === key).length
-        if (after > 0 && (after >= before || PluginsLoader.pluginCount >= countBefore)) ok++
+      for (const key of toReload) {
+        if (await PluginsLoader.changePlugin(key)) ok++
         else failed.push(key)
       }
+
       const msg = `处理完成 · 成功 ${ok} 个${failed.length ? ` · 失败 ${failed.length} 个（${failed.join(', ')}）` : ''} · 用时 ${Date.now() - start}ms`
       logger.mark(msg)
       if (e.group_id) await Bot.sendGroupMsg(e.self_id, e.group_id, msg)

@@ -118,6 +118,51 @@ send()
 await sleep(400)
 check('卸载后不再响应（无匹配插件）', !json().includes('热重载版本'), json().slice(0, 40))
 
+
+/** 6. 重载时清理插件注册的 express 路由（避免重复注册） */
+{
+  const dir = 'plugins/hotreload-route'
+  fs.rmSync(dir, { recursive: true, force: true })
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'index.js'),
+    `import { JiuLiPlugin } from 'jiuli'
+const app = Bot.express
+app.get('/hotreload-route-test', (req, res) => res.end('ok'))
+
+export default class RoutePlugin extends JiuLiPlugin {
+  constructor() {
+    super({ name: '路由测试', dsc: 'test', event: 'message', priority: -Infinity, rule: [{ reg: '^#路由测试$', fnc: 'hi' }] })
+  }
+  async hi() {
+    return this.reply('路由测试 OK')
+  }
+}
+`,
+  )
+
+  const countRoute = () => {
+    const router = globalThis.Bot.express?.router || globalThis.Bot.express?._router
+    return (router?.stack || []).filter(l => l.route?.path === '/hotreload-route-test').length
+  }
+
+  await sleep(4000)
+  check('插件注册的 express 路由已生效', countRoute() === 1, `路由层数 ${countRoute()}`)
+
+  sent.length = 0
+  emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#重载 hotreload-route' })
+  await sleep(5000)
+  check('重载后路由不重复注册（清理旧层）', countRoute() === 1, `重载后路由层数 ${countRoute()}`)
+
+  sent.length = 0
+  emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#路由测试' })
+  await sleep(500)
+  check('重载后指令仍可用', json().includes('路由测试 OK'), json().slice(0, 50))
+
+  fs.rmSync(dir, { recursive: true, force: true })
+  await sleep(3500)
+}
+
 /* 汇总 */
 fs.rmSync(DIR, { recursive: true, force: true })
 const pass = results.filter(r => r.ok).length

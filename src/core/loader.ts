@@ -78,6 +78,8 @@ class PluginsLoader {
 
   /** 事件索引：post_type → 插件条目 */
   eventIndex = new Map<string, PluginEntry[]>()
+  /** 没有插件类的文件（适配器 / 纯胶水文件）：#重载 时跳过，避免重复副作用 */
+  inertFiles = new Set<string>()
   /** 命令冷却cd */
   groupCD: Record<string, boolean> = {}
   singleCD: Record<string, boolean> = {}
@@ -207,6 +209,9 @@ class PluginsLoader {
     const start_time = Date.now()
     let success = true
     this.pluginCountMap.set(file.name, 0)
+    /** 标记当前加载的插件：Bot 据此记录该插件注册的 express 路由与 WS 路径 */
+    const prevLoading = (globalThis as any).__jiuliLoading
+    ;(globalThis as any).__jiuliLoading = file.name
     try {
       const module: any = await import(file.path)
       const app = module.apps ? { ...module.apps } : module
@@ -232,6 +237,10 @@ class PluginsLoader {
       } else {
         util.makeLog('error', [`插件加载错误 ${logger.red(file.name)}`, error], 'Plugin')
       }
+    } finally {
+      ;(globalThis as any).__jiuliLoading = prevLoading
+      /** 没有任何插件类的文件（适配器 / 纯胶水文件）：#重载 时不必再导入 */
+      if (!this.pluginCountMap.get(file.name)) this.inertFiles.add(file.name)
     }
     this.load_time[file.name] = Date.now() - start_time
     return success
@@ -887,6 +896,9 @@ class PluginsLoader {
   /* ==================== 卸载/热重载 ==================== */
 
   async unloadPlugin(key: string, closeWatcher = false) {
+    /** 先清理插件注册的 express 路由与 WS 路径（热重载不重复注册） */
+    ;(globalThis as any).Bot?.cleanupPluginResources?.(key)
+
     const entries = this.priority.filter(i => i.key === key)
     const namespaces = new Set(entries.map(i => i.namespace || i.plugin.namespace || key))
     for (const ns of namespaces) Handler.del(ns)
@@ -948,8 +960,10 @@ class PluginsLoader {
       this.priority.sort((a, b) => a.priority - b.priority)
       this.buildEventIndex()
       this.createTask()
+      return success
     } catch (err) {
       util.makeLog('error', [`插件加载错误 ${logger.red(key)}`, err], 'Plugin')
+      return false
     }
   }
 
@@ -964,6 +978,12 @@ class PluginsLoader {
     return parts[0]
   }
 
+  /** 是否为"无插件类"的文件（适配器 / 胶水文件） */
+  isInert(key: string) {
+    return this.inertFiles.has(key)
+  }
+
+  /** 判断是否已加载 */
   private isLoaded(key: string) {
     return this.pluginCountMap.has(key) || this.priority.some(i => i.key === key)
   }

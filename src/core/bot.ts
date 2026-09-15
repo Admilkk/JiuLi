@@ -90,6 +90,8 @@ export default class JiuLiBot extends EventEmitter {
 
   constructor() {
     super()
+    /** 记录插件注册的 express 路由与 WS 路径，卸载/重载时清理（避免重复注册与端口/处理器冲突） */
+    this.wrapExpress()
     /** 属性回落解析缓存（函数绑定等） */
     const cache = new Map<string | symbol, any>()
     const resolve = (prop: string | symbol) => {
@@ -157,6 +159,95 @@ export default class JiuLiBot extends EventEmitter {
       ownKeys: () => Reflect.ownKeys(this.bots),
       getOwnPropertyDescriptor: (_target, prop) => Reflect.getOwnPropertyDescriptor(this.bots, prop),
     }) as any
+  }
+
+  /* ==================== 插件注册资源（热重载清理） ==================== */
+
+  private pluginLayers = new Map<string, Set<any>>()
+  private pluginWs = new Map<string, Set<string>>()
+
+  /** 当前正在加载的插件 key（由 loader 在 import 前后设置） */
+  private get loadingKey(): string | undefined {
+    return (globalThis as any).__jiuliLoading
+  }
+
+  /**
+   * 包装 express 路由方法：记录「哪个插件注册了哪些层」
+   * 插件重载时先清理旧层，避免路由重复注册（表现为重复响应、端口占用等）
+   */
+  private wrapExpress() {
+    const app = this.express
+    for (const method of ['get', 'post', 'put', 'delete', 'patch', 'options', 'head', 'all', 'use', 'route']) {
+      const orig = app[method].bind(app)
+      app[method] = (...args: any[]) => {
+        const key = this.loadingKey
+        const router = app.router || app._router
+        const before = router?.stack?.length ?? 0
+        const ret = orig(...args)
+        const after = router?.stack?.length ?? 0
+        if (key && after > before) {
+          let set = this.pluginLayers.get(key)
+          if (!set) this.pluginLayers.set(key, (set = new Set()))
+          for (const layer of router.stack.slice(before, after)) set.add(layer)
+        }
+        return ret
+      }
+    }
+
+    /** wsf（WebSocket 处理器表）：记录插件占用过的路径 */
+    const wsf = this.wsf
+    this.wsf = new Proxy(wsf, {
+      set: (target, prop: string, value) => {
+        const key = this.loadingKey
+        if (key && typeof prop === 'string') {
+          let set = this.pluginWs.get(key)
+          if (!set) this.pluginWs.set(key, (set = new Set()))
+          set.add(prop)
+        }
+        target[prop] = value
+        return true
+      },
+      deleteProperty: (target: any, prop: string | symbol) => {
+        delete target[prop as any]
+        return true
+      },
+      get: (target: any, prop: string | symbol) => target[prop as any],
+      ownKeys: target => Reflect.ownKeys(target),
+      getOwnPropertyDescriptor: (target: any, prop: string | symbol) =>
+        Reflect.getOwnPropertyDescriptor(target, prop),
+    })
+  }
+
+  /** 插件卸载/重载前清理它注册的路由与 WS 路径 */
+  cleanupPluginResources(key: string) {
+    const router = this.express?.router || this.express?._router
+    let routes = 0
+    const layers = this.pluginLayers.get(key)
+    if (layers) {
+      for (const layer of layers) {
+        const index = router?.stack?.indexOf(layer) ?? -1
+        if (index > -1) {
+          router.stack.splice(index, 1)
+          routes++
+        }
+      }
+      this.pluginLayers.delete(key)
+    }
+
+    let ws = 0
+    const paths = this.pluginWs.get(key)
+    if (paths) {
+      for (const p of paths)
+        if (p in this.wsf) {
+          delete (this.wsf as any)[p]
+          ws++
+        }
+      this.pluginWs.delete(key)
+    }
+
+    if (routes || ws)
+      util.makeLog('debug', `已清理插件注册的 express 路由 ${routes} 条 · WS 路径 ${ws} 个 · ${key}`, 'Plugin')
+    return { routes, ws }
   }
 
   /* ==================== HTTP 服务 ==================== */
