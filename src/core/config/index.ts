@@ -284,4 +284,6 @@ class Cfg {
 }
 
 const cfg = new Cfg() as Cfg & Record<string, any>
+/** 日志对齐（log.ts）与配置模块自身都要读它，挂到全局可避免 log ←→ config 循环 import */
+;(globalThis as any).cfg = cfg
 export default cfg

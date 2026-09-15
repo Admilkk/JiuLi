@@ -336,8 +336,18 @@ class PluginsLoader {
     try {
       const module: any = await import(file.path)
       const app = module.apps ? { ...module.apps } : module
+      /**
+       * 同一个类可能既作 default 又作具名导出（如 system/restart.js 的 Restart），
+       * 逐个实例化会让它的 init() 跑多次 —— 重复注册事件监听与定时任务。
+       */
+      const seen = new Set<any>()
       const pluginArray: any[] = []
-      for (const key in app) pluginArray.push(this.loadPlugin(file, app[key]))
+      for (const key in app) {
+        const item = app[key]
+        if (seen.has(item)) continue
+        seen.add(item)
+        pluginArray.push(this.loadPlugin(file, item))
+      }
       for (const i of await Promise.allSettled(pluginArray))
         if (i?.status && i.status !== 'fulfilled') {
           success = false

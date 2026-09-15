@@ -51,3 +51,6 @@ test/tmp-*.mjs
 .tmp-plugins/
 test/.restart-result
 test/.supervisor-result
+
+# 测试用的隔离目录
+.tmp-plugins*/

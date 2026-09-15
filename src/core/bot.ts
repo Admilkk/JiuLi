@@ -95,6 +95,15 @@ export default class JiuLiBot extends EventEmitter {
       const cached = cache.get(prop)
       if (cached !== undefined) return cached
 
+      /**
+       * 实例自身属性优先（原样返回，不 bind：express app / server 本身是函数对象，bind 会丢掉 .get/.use 等自有属性）。
+       * 插件常用 `Bot.xxx = 自定义` 覆盖框架方法，先查原型的话覆盖会被原型方法挡住、等于没生效。
+       */
+      if (Object.prototype.hasOwnProperty.call(this, prop)) {
+        const own = (this as any)[prop]
+        if (own !== undefined) return own
+      }
+
       const proto = Object.getPrototypeOf(this)
       const desc = Object.getOwnPropertyDescriptor(proto, prop as string)
       if (desc?.get) return (this as any)[prop]
@@ -108,9 +117,9 @@ export default class JiuLiBot extends EventEmitter {
         return value
       }
 
-      const own = (this as any)[prop]
-      /** 实例字段原样返回：express app / server 本身是函数对象，bind 会丢掉 .get/.use 等自有属性 */
-      if (own !== undefined) return own
+      /** 继承自更上层原型的方法（如 EventEmitter 的 on / once）原样返回，调用时 this 仍是代理 */
+      const inherited = (this as any)[prop]
+      if (inherited !== undefined) return inherited
 
       const u = (util as any)[prop]
       if (u !== undefined) {

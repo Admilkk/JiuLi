@@ -12,7 +12,7 @@ import { Buffer } from 'node:buffer'
 import { fileTypeFromBuffer } from 'file-type'
 import { ulid } from 'ulid'
 import cfg from './config/index.js'
-import { logger } from './log.js'
+import { logger, writeLog } from './log.js'
 
 class Util {
   /** 截断文本（日志预览用） */
@@ -150,10 +150,9 @@ class Util {
 
   makeLog(level: string, msg: any, id?: any, force?: boolean) {
     if (!this.isLogLevelEnabled(level)) return
-    const log: any[] = []
-    if (id !== false) log.push(logger.blue(`[${force ? id : this.makeLogID(id)}]`))
-    for (const i of Array.isArray(msg) ? msg : [msg]) log.push(this.Loging(i))
-    ;(logger.logger as any)[level]?.(...log)
+    const list: any[] = []
+    for (const i of Array.isArray(msg) ? msg : [msg]) list.push(this.Loging(i))
+    writeLog(level, id === false ? false : id, list, !!force)
   }
 
   makeError(msg: string, ...obj: any[]) {

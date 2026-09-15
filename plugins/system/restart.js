@@ -65,10 +65,11 @@ export default class Restart extends JiuLiPlugin {
   }
 
   async restartMsg() {
-    let restart = await redis.get(this.key)
-    if (!restart) return
-    await redis.del(this.key)
-    restart = JSON.parse(restart)
+    const raw = await redis.get(this.key)
+    if (!raw) return
+    /** 原子认领：多个监听器同时在（重复实例化、热重载残留）时只有删掉键的那个发通知 */
+    if (!(await redis.del(this.key))) return
+    const restart = JSON.parse(raw)
     if (restart.isStop) return this.stop(restart.time)
 
     const time = Bot.getTimeDiff(restart.time)

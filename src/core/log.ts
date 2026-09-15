@@ -6,6 +6,8 @@ import { Chalk } from 'chalk'
 import fs from 'node:fs'
 import path from 'node:path'
 
+export const chalk = new Chalk({ level: 3 })
+
 export type LogLevel = 'trace' | 'debug' | 'info' | 'mark' | 'warn' | 'error' | 'fatal' | 'off'
 
 const LEVEL_RANK: Record<string, number> = {
@@ -99,16 +101,57 @@ function renderArgs(args: any[]): string {
   return parts.join(' ')
 }
 
-function output(level: string, size: 'command' | 'error' | 'default', args: any[]) {
+/** 等级配色，只作用于终端（写文件前会 stripColor） */
+const LEVEL_STYLE: Record<string, (str: string) => string> = {
+  trace: chalk.gray,
+  debug: chalk.gray,
+  info: chalk.cyan,
+  mark: chalk.magenta,
+  warn: chalk.yellow,
+  error: (str: string) => chalk.bold.red(str),
+  fatal: (str: string) => chalk.bgRed.white(str),
+}
+
+/** 没有携带 id 的日志（插件直接调 logger.xxx、第三方库）统一挂框架名 */
+const DEFAULT_ID = 'JiuLi'
+
+/** 与 util.makeLogID 同一套对齐规则；此处自带实现，避免 util ←→ log 循环依赖 */
+function alignId(id: string) {
+  const align: string | undefined = (globalThis as any).cfg?.bot?.log_align
+  if (!align) return id
+  const length = (align.length - id.length) / 2
+  if (length > 0) return `${' '.repeat(Math.ceil(length))}${id}${' '.repeat(Math.floor(length))}`
+  if (length < 0) return `${id.slice(0, align.length - 1)}.`
+  return id
+}
+
+function sizeOf(level: string): 'command' | 'error' | 'default' {
+  if (level === 'mark' || level === 'warn') return 'command'
+  if (level === 'error' || level === 'fatal') return 'error'
+  return 'default'
+}
+
+function output(level: string, args: any[], id?: string | false, raw = false) {
   if (!isEnabled(level)) return
-  const msg = `${timeStr()} ${level.toUpperCase().padEnd(5)} ${renderArgs(args)}`
-  if (size === 'error') console.error(msg)
+  const style = LEVEL_STYLE[level] || ((str: string) => str)
+  /** id 为 false 表示这行不带来源列；raw 用于长 id（如 `10001 => 20002`），不做对齐 */
+  const source = id ?? DEFAULT_ID
+  const name = raw ? String(source) : alignId(String(source))
+  const color = String(source) === DEFAULT_ID ? chalk.bold.green : chalk.blue
+  const tag = id === false ? '' : `${color(`[${name}]`)} `
+  const msg = `${timeStr()} ${style(level.toUpperCase().padEnd(5))} ${tag}${renderArgs(args)}`
+  if (sizeOf(level) === 'error') console.error(msg)
   else console.log(msg)
 
   const line = `${stripColor(msg)}\n`
   const day = dateStr()
   fileWriter.write(path.join(logDir, `jiuli.${day}.log`), line)
-  if (size === 'error') fileWriter.write(path.join(logDir, 'error', `error.${day}.log`), line)
+  if (sizeOf(level) === 'error') fileWriter.write(path.join(logDir, 'error', `error.${day}.log`), line)
+}
+
+/** 带来源列的写入入口：框架内部（util.makeLog）用它把模块名放进日志左边那列 */
+export function writeLog(level: string, id: string | false | undefined, args: any[], raw = false) {
+  output(level, args, id, raw)
 }
 
 function isEnabled(level: string) {
@@ -120,10 +163,7 @@ function createChannel(...levels: string[]): LoggerChannel {
   const channel: any = {}
   channel.isLevelEnabled = (level: string) => levels.includes(level) && isEnabled(level)
   for (const level of levels) {
-    channel[level] = (...args: any[]) => {
-      const size = level === 'mark' || level === 'warn' ? 'command' : level === 'error' || level === 'fatal' ? 'error' : 'default'
-      output(level, size as any, args)
-    }
+    channel[level] = (...args: any[]) => output(level, args)
   }
   return channel as LoggerChannel
 }
@@ -138,15 +178,11 @@ const anyLogger: LoggerChannel = (() => {
     isLevelEnabled: (level: string) => isEnabled(level),
   }
   for (const level of ['trace', 'debug', 'info', 'mark', 'warn', 'error', 'fatal']) {
-    channel[level] = (...args: any[]) => {
-      const size = level === 'mark' || level === 'warn' ? 'command' : level === 'error' || level === 'fatal' ? 'error' : 'default'
-      output(level, size as any, args)
-    }
+    channel[level] = (...args: any[]) => output(level, args)
   }
   return channel as LoggerChannel
 })()
 
-export const chalk = new Chalk({ level: 3 })
 type LevelMethod = (...args: any[]) => void
 
 type Logger = typeof chalk & {
