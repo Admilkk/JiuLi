@@ -65,11 +65,9 @@ function pm2(args) {
 const SESSION = process.env.JIULI_SESSION || 'jiuli'
 
 function hasCmd(cmd) {
-  const ret = spawnSync(isWin ? 'where' : 'command', isWin ? [cmd] : ['-v', cmd], {
-    stdio: 'ignore',
-    shell: !isWin,
-  })
-  return ret.status === 0
+  /** 拼成单字符串：带 shell 时再传 args 会触发 DEP0190 警告 */
+  const line = isWin ? `where ${cmd}` : `command -v ${cmd}`
+  return spawnSync(line, { stdio: 'ignore', shell: true }).status === 0
 }
 
 /** 服务器上没装复用终端工具时的安装提示 */
@@ -84,6 +82,11 @@ function installHint() {
 /** 进入 tmux 会话跑起来：已存在则接管，不存在则新建并启动 */
 function cmdSession(args = []) {
   const appArgs = args.filter(a => !a.startsWith('-'))
+
+  /** 与 start 一致的前置：依赖 / 内核编译 / 配置都得先就绪（新克隆的机器上 lib/core 还是空的） */
+  ensureDeps()
+  ensureBuild()
+  ensureConfig()
 
   /** 已经身处 tmux 里就不用再套一层，直接跑 */
   if (process.env.TMUX) {
@@ -152,6 +155,8 @@ function ensureDeps({ auto = true } = {}) {
 function srcNewerThanBuild() {
   const marker = path.join(CWD, 'lib', 'index.js')
   if (!fs.existsSync(marker)) return true
+  const srcDir = path.join(CWD, 'src')
+  if (!fs.existsSync(srcDir)) return false
   const buildTime = fs.statSync(marker).mtimeMs
   const walk = dir => {
     let newest = 0
@@ -162,7 +167,7 @@ function srcNewerThanBuild() {
     }
     return newest
   }
-  return walk(path.join(CWD, 'src')) > buildTime
+  return walk(srcDir) > buildTime
 }
 
 function ensureBuild({ auto = true } = {}) {

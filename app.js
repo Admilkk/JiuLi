@@ -8,6 +8,25 @@
  *   node . pm2        由 pm2 管理（pnpm start）
  *   node . stop       请求正在运行的实例退出
  */
+import fs from 'node:fs'
+
+/** lib/core 是编译产物（不入库）：新克隆的机器上还没编译，这里给出明确指引而不是模块找不到 */
+if (!fs.existsSync(new URL('./lib/core/start.js', import.meta.url))) {
+  console.error(
+    [
+      '',
+      '  lib/core 不存在：内核还没编译（编译产物不入库，克隆后需要先构建）。',
+      '',
+      '  任选其一：',
+      '    node jiuli b     # 只编译内核',
+      '    node jiuli i     # 装依赖 + 编译 + 生成配置（首次部署推荐）',
+      '    node jiuli m     # 启动进 tmux（会自动完成上面的前置步骤）',
+      '',
+    ].join('\n'),
+  )
+  process.exit(1)
+}
+
 switch (process.env.app_type || process.argv[2]) {
   case 'stop': {
     const cfg = (await import('./lib/core/config/index.js')).default
