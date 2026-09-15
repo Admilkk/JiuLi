@@ -1,6 +1,4 @@
-/**
- * JiuLi 内核导出
- */
+/** JiuLi 内核导出 */
 export { default as JiuLiBot } from './bot.js'
 export { default as BasePlugin } from './plugin.js'
 export { default as cfg } from './config/index.js'

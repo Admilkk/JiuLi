@@ -1,8 +1,4 @@
-/**
- * 插件配置文件生成（兼容云崽 makeConfig）
- *
- * 插件调用 `makeConfig('文件名', 默认值, 保留值, 选项)` 得到 { config, configSave, configFile }
- */
+/** 插件配置文件生成（兼容云崽 makeConfig） */
 import fs from 'node:fs/promises'
 import YAML from 'yaml'
 import chokidar from 'chokidar'
@@ -12,7 +8,7 @@ import { logger } from './log.js'
 
 const map = new Map<string, any>()
 
-/** 深度合并（数组按下标合并，与 lodash.merge 行为一致） */
+/** 深度合并；数组按下标合并，与 lodash.merge 行为一致 */
 function merge(target: any, source: any): any {
   if (source === undefined) return target
   if (Array.isArray(target) && Array.isArray(source)) {
@@ -26,11 +22,7 @@ function merge(target: any, source: any): any {
   return source
 }
 
-/**
- * 监听配置文件变化
- * @this {object} config 配置对象
- * @this {string} configFile 配置文件路径
- */
+/** 监听配置文件变化，需绑定 { config, configFile } 作为 this */
 export async function watcher(this: any) {
   try {
     logger.debug('配置文件', this.configFile, '发生变化')

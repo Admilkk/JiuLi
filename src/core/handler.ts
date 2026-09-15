@@ -1,9 +1,4 @@
-/**
- * 跨插件 handler 总线（兼容云崽 Handler）
- *
- * Handler.add({ ns, key|event, fn, self, priority })
- * Handler.call(key, e, args) → 依优先级调用，返回第一个非 reject 的结果
- */
+/** 跨插件 handler 总线（兼容云崽 Handler） */
 import { logger } from './log.js'
 
 interface HandlerItem {

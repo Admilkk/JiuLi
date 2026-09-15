@@ -1,10 +1,7 @@
 /**
  * Redis 客户端
- *
- * - 正常情况：连接真实 Redis（node-redis v4，插件按原生客户端使用）
- * - 连接失败且为本机地址：尝试拉起本地 redis-server（cfg.redis.path）
- * - 仍失败：cfg.jiuli.redis_fallback 为 true 时降级为内存实现（重启丢失），
- *   否则退出。内存实现覆盖插件常用命令，未实现的命令返回 null 并告警一次。
+ * 连接真实 Redis；本机地址连接失败时尝试拉起本地 redis-server；
+ * 仍失败则按 cfg.jiuli.redis_fallback 决定降级为内存实现（未实现的命令返回 null 并告警一次）或退出。
  */
 import { createClient } from 'redis'
 import { spawn } from 'node:child_process'
@@ -473,7 +470,7 @@ export class Redis {
   }
 }
 
-/** 初始化全局 redis */
+/** 注入全局 redis */
 export async function redisInit(): Promise<any> {
   if (process.env.JIULI_REDIS === 'memory') {
     logger.warn('[Redis] JIULI_REDIS=memory，使用内存实现')

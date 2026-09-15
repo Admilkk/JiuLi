@@ -1,11 +1,7 @@
 /**
  * Bot 单例
- *
- * 兼容云崽的全部隐式语义：
- * - Bot 是 Proxy：属性回落链 Bot.x → util.x → bots[x] → Bot[随机uin].x
- * - Bot.uin 特化数组：toJSON() 随机取号（60s 缓存）、toString(raw)、includes
- * - Bot.adapter 特化数组：按 path 去重 push
- * - 内置 HTTP / WebSocket 服务、文件托管、多账号路由
+ * Bot 是 Proxy：属性回落链 Bot.x → util.x → bots[x] → Bot[随机uin].x，
+ * 并带 uin / adapter 两个云崽约定的特化数组，内置 HTTP / WebSocket 与文件托管。
  */
 import express from 'express'
 import compression from 'compression'
@@ -37,6 +33,7 @@ export default class JiuLiBot extends EventEmitter {
         }
         const array = this.slice(1)
         this.now = array[Math.floor(Math.random() * array.length)]
+        // 60s 内复用同一个随机账号，避免连续操作跨号
         setTimeout(() => delete this.now, 60000)
       }
       return this.now
@@ -112,8 +109,7 @@ export default class JiuLiBot extends EventEmitter {
       }
 
       const own = (this as any)[prop]
-      /** 实例字段原样返回：express app / server 等本身可能是"函数对象"（如 express()），
-       *  绑定会丢掉它自己的属性（.get/.use/.quiet），导致插件挂路由失败 */
+      /** 实例字段原样返回：express app / server 本身是函数对象，bind 会丢掉 .get/.use 等自有属性 */
       if (own !== undefined) return own
 
       const u = (util as any)[prop]
@@ -171,10 +167,7 @@ export default class JiuLiBot extends EventEmitter {
     return (globalThis as any).__jiuliLoading
   }
 
-  /**
-   * 包装 express 路由方法：记录「哪个插件注册了哪些层」
-   * 插件重载时先清理旧层，避免路由重复注册（表现为重复响应、端口占用等）
-   */
+  /** 包装 express 路由方法，记录每个插件注册的层；重载时先清理旧层，避免路由重复注册 */
   private wrapExpress() {
     const app = this.express
     for (const method of ['get', 'post', 'put', 'delete', 'patch', 'options', 'head', 'all', 'use', 'route']) {
@@ -194,7 +187,7 @@ export default class JiuLiBot extends EventEmitter {
       }
     }
 
-    /** wsf（WebSocket 处理器表）：记录插件占用过的路径 */
+    /** 代理 wsf（WebSocket 处理器表），记录插件占用过的路径 */
     const wsf = this.wsf
     this.wsf = new Proxy(wsf, {
       set: (target, prop: string, value) => {
@@ -409,10 +402,10 @@ export default class JiuLiBot extends EventEmitter {
     await initRedisOrFallback()
     await this.serverLoad()
     if (cfg.server.https?.key && cfg.server.https?.cert) await this.httpsLoad()
-    /** 加载渲染后端（浏览器仍在首次截图时懒启动） */
+    /** 加载渲染后端，浏览器仍在首次截图时懒启动 */
     const { default: renderService } = await import('./render/index.js')
     await renderService.load()
-    /** 预热框架模块：让"插件加载耗时"只反映插件自身成本，而不是第一个 import 的冷启动 */
+    /** 预热框架模块，使"插件加载耗时"只反映插件自身成本 */
     await import('./index.js')
     await import('../index.js')
     await PluginsLoader.load()

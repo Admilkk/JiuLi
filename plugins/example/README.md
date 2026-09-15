@@ -1,44 +1,35 @@
 # 你自己的插件放这里
 
-这个目录是留给**你自己写的插件**的：往里丢一个 `.js` 就会被加载，改动即时热重载，不用重启。
+往里丢一个 `.js` 就会被加载，改动即时热重载。
 
 ```bash
-# 1. 生成骨架（默认就生成到这个目录）
-pnpm jiuli create my-plugin
-
-# 2. 或者手动新建，比如 plugins/example/天气.js
-#    然后终端发 #重载 或直接等 2 秒（内核会自动检测新增文件）
+pnpm jiuli create my-plugin     # 生成骨架（默认生成到这个目录）
 ```
 
-目录里的 `qqbot图床.js` 是自行加入的第三方文件（已在 `.gitignore` 中排除，不入库）。
+目录里的 `qqbot图床.js` 是自行放入的第三方文件，已在 `.gitignore` 中排除。
 
-## 插件的依赖装这里
+## 依赖
 
-`package.json` 是**你自己插件的依赖清单**：需要什么库就往 `dependencies` 里加，然后在项目根目录执行一次安装：
+`package.json` 是本目录插件的依赖清单。加依赖的步骤：
 
 ```bash
-# 例如给插件用 axios
-# 1. 编辑 plugins/example/package.json → dependencies 加 "axios": "^1.7.9"
-# 2. 安装
+# 1. 在 plugins/example/package.json → dependencies 里加，例如 "axios": "^1.7.9"
+# 2. 根目录安装
 pnpm install
-# 3. 重启实例（#重启）让它生效
+# 3. #重启（动态 import 的解析结果会被缓存，新装依赖必须重启）
 ```
 
-已经装好的：`jiuli`（框架包，`import { JiuLiPlugin } from 'jiuli'` 靠它）、`axios`、`form-data`（`qqbot图床.js` 上传图片用）。
+已装好：`jiuli`（框架包）、`axios`、`form-data`。
 
-> 注意：**任何自带 `package.json` 的插件目录都必须声明 `"jiuli": "link:../.."`**，
-> 否则目录里 `import ... from 'jiuli'` 会解析失败（Node 会就近找 package.json，找不到框架包）。
-> 本目录已经声明好，`pnpm jiuli create --dir` 生成的目录也会自动带上。
+> 任何自带 `package.json` 的插件目录都要声明 `"jiuli": "link:../.."`，否则
+> `import ... from 'jiuli'` 会解析失败——Node 会就近找 package.json，找不到框架包。
+> 本目录已声明，`pnpm jiuli create --dir` 生成的目录也会自动带上。
 
-> 依赖装在 `plugins/example/node_modules/`，不会污染框架依赖；
-> 注意：动态 `import()` 的解析结果会被缓存，**新装依赖后需要 `#重启` 一次**。
+## 约定
 
-## 相关约定
+- 一个 `.js` = 一个插件；也可以建子目录放 `index.js`
+- 渲染模板放 `resources/<模板名>/index.html`，代码里 `await this.render('模板名/index', data)`
+- 插件数据放 `this.dataDir`（`data/plugins/<插件目录名>/`）
+- 内置功能在 `../system/`，示例在 `../demo/`，适配器在 `../adapter/`——这三个目录随框架更新，不要往里写自己的代码
 
-- 一个 `.js` = 一个插件；也可以建子目录（子目录里放 `index.js`，或者直接平铺多个 js）
-- 渲染模板放在 `resources/<模板名>/index.html`（例如 `resources/天气/index.html`），
-  插件里用 `await this.render('天气/index', data)` 引用
-- 想放自己的数据：`this.dataDir`（`data/plugins/<插件目录名>/`）
-- 完整说明见 [`../README.md`](../README.md) 与 [`../../docs/plugin-guide.md`](../../docs/plugin-guide.md)
-
-> 内置功能在 `../system/`，示例在 `../demo/`，适配器在 `../adapter/`——这三个目录随框架更新，建议不要往里放自己的代码。
+完整说明见 [`../README.md`](../README.md) 与 [`../../docs/plugin-guide.md`](../../docs/plugin-guide.md)。

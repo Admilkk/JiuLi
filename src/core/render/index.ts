@@ -1,12 +1,6 @@
 /**
- * 渲染后端加载器
- *
- * 扫描 renderers/<name>/ 目录加载渲染后端（用户可扩展）：
- *   renderers/<name>/index.js        export default (config) => renderer 对象
- *   renderers/<name>/config.yaml     用户配置（缺失时从 config_default.yaml 复制）
- *
- * renderer 对象要求：{ id, type, render(name, data) }
- * 渲染时按顺序尝试后端，返回第一个成功的结果（Buffer 或 Buffer[]）
+ * 渲染后端加载器：扫描 renderers/<name>/index.js（默认导出 (config) => renderer）
+ * 后端契约 { id, type, render(name, data) }，渲染时依序尝试并返回首个成功结果。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -16,7 +10,7 @@ import { logger } from '../log.js'
 import cfg from '../config/index.js'
 import util from '../util.js'
 
-/** 惰性获取 segment（由兼容层注入全局） */
+/** 优先用兼容层注入的全局 segment，否则回退到 oicq 包 */
 async function getSegment() {
   const g = globalThis as any
   if (g.segment) return g.segment
@@ -48,7 +42,7 @@ export class RendererLoader {
     for (const subFolder of subFolders) {
       const name = subFolder.name
       try {
-        /** 绝对路径加载：renderers 位于项目根目录，不受本文件层级影响 */
+        /** 动态 import 的相对说明符以本文件为基准，故必须传绝对路径 URL */
         const rendererUrl = pathToFileURL(path.resolve(this.dir, name, 'index.js')).href
         const rendererFn = (await import(rendererUrl)).default
         const configFile = `${this.dir}/${name}/config.yaml`

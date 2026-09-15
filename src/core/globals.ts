@@ -1,9 +1,4 @@
-/**
- * 全局变量注入（兼容层核心）
- *
- * 云崽插件的顶层代码就依赖这些全局，必须在任何插件 import 之前完成注入：
- * Bot / logger / redis / segment / Renderer / plugin / start_type
- */
+/** 全局变量注入；云崽插件顶层代码直接依赖这些全局，必须在任何插件 import 之前完成 */
 import { logger } from './log.js'
 import plugin from './plugin.js'
 import segment, { extendSegment } from './segment.js'

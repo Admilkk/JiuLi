@@ -1,11 +1,4 @@
-/**
- * JiuLi 公共类型定义
- *
- * 设计原则：
- * - 事件对象保持云崽（TRSS-Yunzai）的字段名，保证旧插件零改动
- * - 通过索引签名允许插件自由扩展字段
- * - 新增能力（store / raw / contact 等）作为可选字段补充
- */
+/** JiuLi 公共类型定义；字段命名沿用云崽（TRSS-Yunzai），旧插件零改动 */
 
 /** 消息元素（segment） */
 export interface Segment {
@@ -26,7 +19,6 @@ export interface Sender {
 export interface ReplyData {
   /** 撤回消息，0-120 秒，0 不撤回 */
   recallMsg?: number
-  /** 是否 at 用户 */
   at?: boolean | string | number
   [key: string]: unknown
 }
@@ -60,11 +52,8 @@ export interface JiuLiEvent {
   /** 是否群聊 / 私聊 */
   isGroup?: boolean
   isPrivate?: boolean
-  /** 是否主人 */
   isMaster?: boolean
-  /** 引用回复的消息 id */
   reply_id?: string | number
-  /** 是否存在别名触发 */
   hasAlias?: boolean
   /** 只关注主动 at 的消息 */
   only_reply_at?: boolean
@@ -75,23 +64,18 @@ export interface JiuLiEvent {
   group?: any
   member?: any
 
-  /** 回复消息 */
   reply?: (msg: any, quote?: boolean, data?: ReplyData) => Promise<any>
-  /** 撤回消息 */
   recall?: (time?: number) => any
-  /** 获取引用消息 */
   getReply?: () => any
-  /** 运行时扩展（懒加载） */
+  /** 运行时扩展，按需挂载 */
   runtime?: any
   /** 插件链内数据传递 */
   store?: Map<string, unknown>
-  /** 协议原始事件 */
   raw?: unknown
 }
 
 /** 命令规则 */
 export interface Rule {
-  /** 命令正则 */
   reg: RegExp | string
   /** 执行方法名，或直接传入函数（JiuLi 原生写法） */
   fnc: string | ((e: JiuLiEvent, match?: RegExpMatchArray) => any)
@@ -107,7 +91,6 @@ export interface Rule {
 /** 定时任务 */
 export interface Task {
   name?: string
-  /** cron 表达式 */
   cron: string
   /** 执行方法名，或直接传入函数 */
   fnc: string | ((...args: any[]) => any)
@@ -141,13 +124,10 @@ export interface PluginOptions {
 
 /** 适配器契约 */
 export interface Adapter {
-  /** 平台标识，如 QQ */
   id: string
-  /** 适配器名称，如 OneBotv11 */
   name: string
-  /** 唯一路径（用于去重） */
+  /** 唯一路径，用于去重 */
   path: string
-  /** 加载适配器 */
   load: () => any
   [key: string]: any
 }
@@ -175,7 +155,6 @@ export interface PluginEntry {
 export interface RenderOptions {
   /** 返回值类型：default/空 自动发送图片；msgId 返回消息 id；base64 返回 base64 */
   retType?: 'default' | 'msgId' | 'base64' | string
-  /** 撤回回复 */
   recallMsg?: boolean
   /** 渲染前改写 data */
   beforeRender?: (data: { data: any }) => any

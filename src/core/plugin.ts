@@ -1,8 +1,4 @@
-/**
- * 插件基类（兼容云崽 plugin，旧插件 `extends plugin` 零改动）
- *
- * 同时作为 JiuLi 原生类形态插件的基类（见 src/index.ts 的 JiuLiPlugin）
- */
+/** 插件基类：兼容云崽 `extends plugin`，也是 JiuLi 原生类形态插件的基类 */
 import type { JiuLiEvent, PluginOptions, Rule, Task, HandlerConfig } from './types.js'
 
 const stateArr: Record<string, Record<string, any>> = {}
@@ -10,26 +6,19 @@ const SymbolTimeout = Symbol('Timeout')
 const SymbolResolve = Symbol('Resolve')
 
 export default class plugin {
-  /** 插件名称 */
   name: string
-  /** 插件描述 */
   dsc: string
-  /** 监听事件，默认 message */
   event: string
-  /** 优先级，数字越小优先级越高 */
+  /** 数字越小优先级越高 */
   priority: number
-  /** 定时任务 */
   task: Task | Task[]
-  /** 命令规则 */
   rule: Rule[]
-  /** 跨插件 handler */
   handler?: HandlerConfig | HandlerConfig[]
-  /** handler 命名空间 */
   namespace?: string
 
-  /** 当前事件（由 loader 注入） */
+  /** 当前事件，由 loader 注入 */
   e!: JiuLiEvent
-  /** 上下文相关字段（旧插件常用 this.group_id / this.user_id / this.self_id 简化写法） */
+  /** 旧插件常以 this.group_id / this.user_id 等简写访问上下文，由 loader 挂载 */
   [key: string]: any
 
   constructor({
@@ -55,20 +44,13 @@ export default class plugin {
     }
   }
 
-  /**
-   * 生命周期：插件加载时调用（返回 "return" 可跳过加载）
-   * - 旧插件：覆盖 init()
-   * - 原生插件：覆盖 onLoad()（本方法会转发过来）
-   */
+  /** 插件加载时调用，返回 "return" 可跳过加载；原生插件覆盖 onLoad()，由本方法转发 */
   async init(): Promise<any> {
     if (typeof (this as any).onLoad === 'function') return (this as any).onLoad()
     return undefined
   }
 
-  /**
-   * 插件配置：首次调用用 defaults 生成 config/<插件名>.yaml 并返回
-   * @returns {Promise<{ config: any; configSave: () => Promise<any>; configFile: string }>}
-   */
+  /** 首次调用以 defaults 生成 config/<插件名>.yaml，之后复用同一 Promise */
   async useConfig(defaults: Record<string, any> = {}, opts: any = {}) {
     const name = opts.name || (this as any).__key || this.name
     if (!this._configPromise) {
@@ -150,10 +132,7 @@ export default class plugin {
     context?.[SymbolResolve]?.(this.e)
   }
 
-  /**
-   * 渲染图片并发送
-   * 优先使用 miao-plugin 的 Common.render（旧生态布局），不可用时走内核渲染
-   */
+  /** 渲染并发送图片；优先 miao-plugin 的 Common.render，不可用时走内核渲染 */
   async renderImg(pluginName: string, tpl: string, data: any = {}, cfg: any = {}) {
     const spec = '#miao'
     try {

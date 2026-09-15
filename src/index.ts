@@ -1,12 +1,6 @@
 /**
- * JiuLi 原生插件 API
- *
- * 三种插件形态并存，同一套内核：
- * 1. 旧插件：`export class X extends plugin {}`（走 lib/ 兼容层，零改动）
- * 2. 原生类形态：`export default class X extends JiuLiPlugin {}`
- * 3. 原生 DSL：`export default definePlugin({ name, apps: [command(...), task(...)] })`
- *
- * 插件通过 `import { ... } from 'jiuli'` 使用本模块。
+ * JiuLi 原生插件 API（`import { ... } from 'jiuli'`）
+ * 三种形态并存：旧插件 extends plugin、原生类 extends JiuLiPlugin、原生 DSL definePlugin。
  */
 import fs from 'node:fs'
 import BasePlugin from './core/plugin.js'
@@ -39,16 +33,15 @@ export { default as renderService } from './core/render/index.js'
 export { default as common } from './core/common.js'
 export { default as makeConfig, watcher as configWatcher } from './core/plugin-config.js'
 
-/** 当前 Bot 实例（即 globalThis.Bot） */
+/** 当前 Bot 实例 */
 export function getBot(): any {
   return (globalThis as any).Bot
 }
 
 /** JiuLi 原生插件基类 */
 export class JiuLiPlugin extends BasePlugin {
-  /** 插件目录名（loader 注入），渲染与数据目录按它定位 */
+  /** 插件目录名，由 loader 注入，用于定位渲染与数据目录 */
   declare __key: string
-  /** 当前事件 */
   declare e: JiuLiEvent
 
   /** 插件私有数据目录 data/plugins/<插件名>，首次访问自动创建 */
@@ -58,22 +51,20 @@ export class JiuLiPlugin extends BasePlugin {
     return dir
   }
 
-  /** 插件私有配置目录 resources 路径前缀（渲染模板里用 pluResPath 即可） */
+  /** 插件 resources/ 路径前缀，渲染模板中以 pluResPath 引用 */
   get resDir(): string {
     return `plugins/${this.__key || this.name}/resources/`
   }
 
   /**
-   * 渲染模板为图片，返回可直接 e.reply() 发送的内容（消息段或 Buffer），失败返回 false
-   * @param tpl 模板路径，相对插件 resources 目录，如 'help/index'
-   * @param data 模板数据
-   * @param opts 渲染选项（imgType/quality/multiPage/pageGotoParams 等）
+   * 渲染模板为图片，返回可直接 e.reply() 的内容，失败返回 false
+   * @param tpl 相对插件 resources 目录的模板路径，如 'help/index'
    */
   async render(tpl: string, data: any = {}, opts: RenderOptions = {}) {
     const plugin = this.__key || this.name
     if (this.e?.runtime?.render) return this.e.runtime.render(plugin, tpl, data, { retType: 'base64', ...opts })
 
-    /** 未经过分发（如定时任务）时的兜底渲染 */
+    /** 未经分发（如定时任务）时的兜底渲染 */
     const { default: renderService } = await import('./core/render/index.js')
     const paths = String(tpl).replace(/\.html$/, '').split('/').filter(Boolean)
     const up = '../'.repeat(paths.length)
@@ -93,10 +84,7 @@ export class JiuLiPlugin extends BasePlugin {
     return segment.image(img)
   }
 
-  /**
-   * 渲染模板并返回 base64:// 字符串（用于自行拼接消息段）
-   * @returns `base64://...` 或 false
-   */
+  /** 渲染模板并返回 base64:// 字符串，失败返回 false */
   async renderBase64(tpl: string, data: any = {}, opts: RenderOptions = {}) {
     const ret: any = await this.render(tpl, data, opts)
     if (!ret) return false
@@ -114,7 +102,6 @@ export interface CommandOptions {
   permission?: 'master' | 'owner' | 'admin' | 'all' | string
   log?: boolean
   priority?: number
-  /** 日志中显示的名称 */
   name?: string
 }
 
@@ -123,25 +110,17 @@ export interface AppDescriptor {
   [key: string]: any
 }
 
-/**
- * 分发前钩子（中间件）：所有候选插件按优先级依次执行；返回 false 可拦截本次分发
- * 旧插件体系没有这个能力，属于 JiuLi 原生扩展
- */
+/** 分发前钩子：候选插件按优先级依次执行，返回 false 拦截本次分发（JiuLi 原生扩展） */
 export function beforeMessage(fnc: (e: JiuLiEvent) => any, options: { priority?: number } = {}): AppDescriptor {
   return { __type: 'hook', stage: 'beforeMessage', fnc, ...options }
 }
 
-/** 分发后钩子：无论是否命中插件都会执行（可用于统计、清理、审计日志） */
+/** 分发后钩子：无论是否命中插件都会执行 */
 export function afterMessage(fnc: (e: JiuLiEvent) => any, options: { priority?: number } = {}): AppDescriptor {
   return { __type: 'hook', stage: 'afterMessage', fnc, ...options }
 }
 
-/**
- * 命令：正则 → 处理函数
- * @param reg 命令正则
- * @param fnc 处理函数，(e, match) => any；返回 false 继续匹配后续规则
- * @param options 事件/权限/日志/优先级
- */
+/** 命令：正则 → 处理函数；fnc 返回 false 时继续匹配后续规则 */
 export function command(
   reg: RegExp | string,
   fnc: (e: JiuLiEvent, match?: RegExpMatchArray) => any,
@@ -150,12 +129,7 @@ export function command(
   return { __type: 'command', reg, fnc, ...options }
 }
 
-/**
- * 定时任务
- * @param cron cron 表达式（5/6 段）
- * @param fnc 执行函数
- * @param options name 任务名；log false 不显示日志；skip 上次未完成时跳过
- */
+/** 定时任务；options.log=false 不显示日志，options.skip 为上次未完成时跳过 */
 export function task(
   cron: string,
   fnc: (...args: any[]) => any,
@@ -164,19 +138,12 @@ export function task(
   return { __type: 'task', cron, fnc, ...options }
 }
 
-/**
- * 事件监听（通知/请求等），等价于插件级 accept
- * @param event 事件名，如 notice.group.poke / request.friend
- * @param fnc 处理函数
- */
+/** 事件监听（通知/请求等），等价于插件级 accept；event 如 notice.group.poke */
 export function accept(event: string, fnc: (e: JiuLiEvent) => any, options: { priority?: number } = {}): AppDescriptor {
   return { __type: 'accept', event, fnc, ...options }
 }
 
-/**
- * 注册跨插件 handler
- * @param key handler key，其他插件可用 e.runtime.handler.call(key, e, args)
- */
+/** 注册跨插件 handler，其他插件以 e.runtime.handler.call(key, e, args) 调用 */
 export function handler(key: string, fnc: (...args: any[]) => any, options: { priority?: number } = {}): AppDescriptor {
   return { __type: 'handler', key, fnc, ...options }
 }
@@ -190,19 +157,7 @@ export interface DefinePluginOptions {
   apps?: AppDescriptor[]
 }
 
-/**
- * 定义插件（返回可被内核加载的类）
- *
- * ```ts
- * export default definePlugin({
- *   name: '示例',
- *   apps: [
- *     command(/^#示例$/, async e => e.reply('hi')),
- *     task('0 8 * * *', async () => logger.mark('早上好')),
- *   ],
- * })
- * ```
- */
+/** 定义插件，返回可被内核加载的类；apps 中的描述符会被转成插件规则 */
 export function definePlugin(options: DefinePluginOptions) {
   const { name = 'jiuli-plugin', dsc = '无', priority = 5000, apps = [] } = options
   const commands = apps.filter(a => a.__type === 'command')
@@ -249,7 +204,7 @@ export function definePlugin(options: DefinePluginOptions) {
         this.accept = named((ev: JiuLiEvent) => accepts[0].fnc.call(this, ev), `${name}:accept`)
       }
 
-      /** 钩子：绑定为同名方法，内核分发前后自动调用 */
+      /** 钩子绑定为同名方法，内核分发前后自动调用 */
       for (const h of hooks) (this as any)[h.stage] = h.fnc.bind(this)
 
       if (handlers.length) {
@@ -267,7 +222,7 @@ export function definePlugin(options: DefinePluginOptions) {
   }
 }
 
-/** 兼容别名：definePlugin 返回的类也可直接当 plugin 用 */
+/** 默认导出：常用 API 集合，方便 `import jiuli from 'jiuli'` */
 export default {
   JiuLiPlugin,
   definePlugin,

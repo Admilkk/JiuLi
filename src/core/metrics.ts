@@ -1,9 +1,4 @@
-/**
- * 插件性能指标
- *
- * 记录每个插件（按来源文件聚合）的处理次数、总耗时、最大耗时，
- * 并在超过阈值时打印慢插件日志。数据供 #性能 指令使用。
- */
+/** 插件性能指标，按来源文件聚合，供 #性能 指令与慢插件告警使用 */
 import type { PluginEntry, PluginMetric } from './types.js'
 import cfg from './config/index.js'
 import { logger } from './log.js'
@@ -30,6 +25,7 @@ class Metrics {
     const threshold = Number(cfg.getPerf().slow_plugin_ms ?? 3000)
     if (threshold > 0 && ms >= threshold) {
       const last = this.warned.get(key) ?? 0
+      // 同一插件 60s 内只告警一次
       if (Date.now() - last > 60000) {
         this.warned.set(key, Date.now())
         logger.warn(`[慢插件] ${entry.name}(${key}) 本次耗时 ${ms}ms，超过阈值 ${threshold}ms`)

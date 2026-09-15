@@ -1,470 +1,216 @@
-# JiuLi 插件开发指南
+# JiuLi 插件开发
 
-JiuLi 支持三种插件形态，共用同一套内核与分发机制：
+三种形态共用同一套内核与分发流程：
 
-| 形态 | 写法 | 适用 |
+| 形态 | 写法 | 场景 |
 |---|---|---|
-| 旧插件（云崽） | `export class X extends plugin { ... rule/task ... }` | 直接从 TRSS-Yunzai 迁移，零改动 |
-| JiuLi 类形态 | `import { JiuLiPlugin } from 'jiuli'` | 需要类型提示与渲染/数据目录辅助 |
-| JiuLi DSL | `definePlugin({ apps: [command(...), task(...)] })` | 偏爱函数式、无 `this` 的写法 |
-
-> 框架自带的开箱功能都在 `plugins/system`（状态/帮助/设置主人/词条/撤回…）、
-> `plugins/other`（重启/关机/更新/日志/版本）与 `plugins/adapter/stdin`（终端交互），
-> 可直接作为原生写法的参考实现。
-
-## 零、先生成骨架
+| 云崽插件 | `export class X extends plugin` | 从 TRSS-Yunzai 迁移，零改动 |
+| JiuLi 类形态 | `import { JiuLiPlugin } from 'jiuli'` | 新插件，想要类型提示与渲染 / 数据目录辅助 |
+| JiuLi DSL | `definePlugin({ apps: [command(...)] })` | 函数式，不用 `this` |
 
 ```bash
-pnpm jiuli create my-plugin          # 类形态（推荐，与云崽写法接近）
-pnpm jiuli create my-plugin --dsl    # 函数式 DSL
+node jiuli c my-plugin          # 生成插件骨架（--dsl 函数式 / --dir 独立目录）
 ```
 
-生成 `plugins/my-plugin/index.js`，文件里逐字段带注释。
-`plugins/` 目录里各文件夹分别是什么、加载规则、最小示例：见 [`plugins/README.md`](../plugins/README.md)。
-
----
-
-## 零之二、两套体系并存（双端适配）
-
-| | 旧体系（云崽） | JiuLi 原生体系 |
-|---|---|---|
-| 写法 | `export class X extends plugin` | `export class X extends JiuLiPlugin` / `definePlugin({...})` |
-| 导入 | 全局 `plugin` / `../../lib/plugins/plugin.js` | `import { JiuLiPlugin, command } from 'jiuli'` |
-| 能力 | `rule` / `task` / `handler` / `accept` / `init()` | 上者全部 + **分发前后钩子** + **onLoad/onUnload** + **useConfig** |
-| 生命周期 | `init()` | `init()` 或 `onLoad()`（基类把 init 转发给 onLoad） |
-
-两种写法加载进同一套注册表与分发流程，互不影响：旧插件不用改一个字，新插件可以用上新增能力。
-
----
-
-## 一、目录结构
+## 目录与加载规则
 
 ```
-plugins/jiuli-plugin-demo/
-├─ package.json         # 可选；有依赖时提供（pnpm workspace 会自动安装）
-├─ index.js             # 入口（存在时只加载此文件）
-├─ apps/                # 拆分的命令文件（被 index.js import）
-├─ model/               # 业务逻辑（可选）
-├─ resources/           # 渲染模板与静态资源
-│   └─ help/index.html
-└─ defSet/              # 默认配置（可选，与云崽生态一致）
+plugins/my-plugin/
+├─ package.json     有依赖时才需要（记得 "jiuli": "link:../.."）
+├─ index.js         入口
+├─ apps/            拆分的命令文件
+├─ model/           业务逻辑
+├─ resources/       渲染模板与静态资源
+└─ defSet/          默认配置
 ```
 
-没有 `index.js` 时，内核会扫描目录下所有 `.js`（与云崽一致，支持热重载）。
+- 只扫描 `plugins/` 下的**目录**（根下的散文件不加载）
+- 目录里有 `index.js` → 只加载它；没有 → 加载该目录下所有 `.js`（不递归）
+- 一个文件可以导出多个插件类，都会被注册
 
----
+## 云崽风格
 
-## 二、类形态
+```js
+export class Demo extends plugin {
+  constructor() {
+    super({
+      name: '演示', dsc: '描述', event: 'message', priority: 5000,
+      rule: [
+        { reg: '^#演示$', fnc: 'demo' },
+        { reg: '^#管理$', fnc: 'admin', permission: 'master' },
+        { reg: '^#静默$', fnc: 'quiet', log: false },
+      ],
+      task: [{ name: '每日', cron: '0 8 * * *', fnc: 'daily' }],
+    })
+  }
+
+  async demo(e) { return e.reply('你好') }
+
+  async init() { /* 加载时一次；返回 "return" 跳过整个插件 */ }
+
+  async accept(e) { /* 每条事件都跑，在 rule 之前 */ }
+
+  async daily() { /* 定时任务里没有 this.e */ }
+}
+```
+
+`rule` 字段：`reg`（字符串/正则，预编译）、`fnc`、`event`（三段通配）、`permission`（master/owner/admin）、`log`。
+
+上下文会话：
+
+```js
+async start() { this.setContext('waiting'); return this.reply('请发送内容') }
+async waiting() { this.finish('waiting'); return this.reply(`收到：${this.e.msg}`) }
+// Promise 形式：const next = await this.awaitContext()   // 超时返回 false
+```
+
+会话按「插件名 + bot + 群/用户」隔离，默认 120 秒超时。
+
+## JiuLi 原生
 
 ```js
 import { JiuLiPlugin } from 'jiuli'
 
 export default class Demo extends JiuLiPlugin {
   constructor() {
-    super({
-      name: '演示',
-      dsc: 'JiuLi 类形态示例',
-      event: 'message',        // 默认 message；通知类事件如 notice.group.poke
-      priority: 100,           // 数字越小越先执行，默认 5000
-      rule: [
-        { reg: '^#演示$', fnc: 'demo' },
-        { reg: /^#演示\s+(.+)$/, fnc: 'demoArgs' },
-        { reg: '^#管理$', fnc: 'admin', permission: 'master' },
-        { reg: '^#静默$', fnc: 'quiet', log: false },
-      ],
-      task: [{ name: '每日任务', cron: '0 8 * * *', fnc: 'daily' }],
-    })
+    super({ name: '演示', priority: 100, rule: [{ reg: '^#渲染$', fnc: 'render' }] })
   }
-
-  /** @param {import('jiuli').JiuLiEvent} e */
-  async demo(e) {
-    await e.reply('你好')
-    return true               // 返回 false 表示继续匹配后续规则
-  }
-
-  async demoArgs(e) {
-    const match = /^#演示\s+(.+)$/.exec(e.msg)
-    await e.reply(`参数：${match?.[1]}`)   // 或使用 handler 的第二个参数
-  }
-
-  async admin(e) {
-    await e.reply('管理员指令')
-  }
-
-  async quiet(e) {
-    await e.reply('静默执行（不打印开始/完成日志）')
-  }
-
-  /** 定时任务中 this.e 为空，不要调用 this.reply */
-  async daily() {
-    logger.mark('[演示] 每日任务执行')
+  async render() {
+    const img = await this.render('hello/index', { title: '你好' })   // 失败返回 false
+    return this.reply(img || '渲染失败')
   }
 }
 ```
 
-### 生命周期钩子
-
-```js
-async init() {
-  // 加载插件时执行一次；返回 "return" 可跳过整个插件的加载
-}
-
-async accept(e) {
-  // 每条事件都会调用（在 rule 之前）
-  // 返回 "return" 终止分发；返回真值跳出 accept 循环（继续 rule 匹配）
-}
-```
-
-### 上下文会话
-
-```js
-async start() {
-  this.setContext('waiting')            // 等待用户下一条消息
-  return this.reply('请发送内容')
-}
-
-async waiting() {
-  this.finish('waiting')                // 结束上下文
-  return this.reply(`收到：${this.e.msg}`)
-}
-
-// 也可用 Promise 形式：
-async ask() {
-  const next = await this.awaitContext()
-  if (next) await this.reply(`收到：${next.msg}`)
-}
-```
-
-上下文按 `插件名 + bot + 群/用户` 隔离，默认 120 秒超时（`setContext(type, isGroup, time, timeout)`）。
-
----
-
-## 三、函数式 DSL
+DSL 形态：
 
 ```js
 import { definePlugin, command, task, accept, handler } from 'jiuli'
 
 export default definePlugin({
   name: '演示',
-  priority: 100,
   apps: [
-    // 命令：正则 → 处理函数（第二个参数是正则匹配结果）
-    command(/^#演示$/, async e => e.reply('你好'), { name: '演示' }),
+    command(/^#演示$/, async (e, match) => e.reply('你好'), { name: '演示' }),
     command(/^#管理$/, async e => e.reply('ok'), { permission: 'master' }),
-    command(/^#群限定$/, async e => e.reply('群消息'), { event: 'message.group' }),
-
-    // 定时任务
-    task('0 8 * * *', () => logger.mark('[演示] 早安'), { name: '早安' }),
-
-    // 通知 / 请求事件
+    task('0 8 * * *', () => logger.mark('早安')),
     accept('notice.group.poke', async e => e.reply('别戳了')),
-
-    // 跨插件 handler（其他插件可用 e.runtime.handler.call('demo.hello', e, args) 调用）
-    handler('demo.hello', (e, args) => `hello ${args ?? ''}`),
+    handler('demo.hello', (e, args) => `hello ${args}`),
   ],
 })
 ```
 
-> `task` 中的函数没有 `this.e`；需要发消息请用 `Bot.sendGroupMsg / Bot.sendFriendMsg`。
+分发钩子（旧体系没有）：
 
----
+```js
+beforeMessage(async e => {
+  if (e.msg === '#禁止') return false      // 返回 false 拦截本次分发
+})
+afterMessage(e => logger.mark(`[审计] ${e.user_id}: ${e.msg}`))
+```
 
-## 四、事件对象 `e`
+类形态需显式声明方法名：`super({ hooks: { beforeMessage: 'onBefore', afterMessage: 'onAfter' } })`。
+钩子不会因为插件里恰好有同名方法就被调用。
 
-字段名与云崽完全一致（便于迁移），常用：
+生命周期与配置：
 
-| 字段 | 说明 |
-|---|---|
-| `e.msg` | 文本消息（多段自动拼接，已做 `#`/`*` 归一化） |
-| `e.raw_message` | 原始消息文本 |
-| `e.message` | 消息段数组 |
-| `e.img` | 图片 URL 数组 |
-| `e.at` / `e.atBot` | 被 at 的用户 / 是否 at 机器人 |
-| `e.user_id` / `e.group_id` / `e.self_id` | 用户 / 群 / 机器人账号 |
-| `e.isGroup` / `e.isPrivate` / `e.isMaster` | 场景与权限 |
-| `e.sender` | `{ user_id, nickname, card, role }` |
-| `e.group` / `e.friend` / `e.member` | 群/好友/成员对象（`sendMsg`、`pickMember`、`makeForwardMsg`、`recallMsg`…） |
-| `e.reply(msg, quote?, { recallMsg?, at? })` | 回复；返回 `{ message_id }` |
-| `e.getReply()` | 获取引用消息 |
-| `e.recall()` | 撤回本条消息 |
-| `e.runtime` | 运行时（`render`、`handler`、`cfg`、`common`） |
+```js
+async onLoad() { this.timer = setInterval(() => {}, 60_000) }
+async onUnload() { clearInterval(this.timer) }        // 卸载 / 热重载前清理
+async init() {
+  const { config, configSave } = await this.useConfig({ enable: true })
+  await configSave()                                   // → config/<插件名>.yaml
+}
+```
 
-发送消息的常见写法：
+实例属性：`this.e`、`this.dataDir`（`data/plugins/<插件名>/`）、`this.resDir`、
+`this.render` / `this.renderBase64`、`this.reply`。
+
+## 事件对象 `e`
+
+`msg` / `raw_message` / `message` / `img` / `at` / `atBot` / `user_id` / `group_id` / `self_id` /
+`isGroup` / `isPrivate` / `isMaster` / `sender` / `e.group` / `e.friend` / `e.member` / `e.runtime`，
+方法 `reply` / `getReply` / `recall` / `logText`。
 
 ```js
 await e.reply('纯文本')
 await e.reply('带引用', true)
 await e.reply([segment.at(e.user_id), '\n你好'])
-await e.reply('5 秒后撤回', true, { recallMsg: 5 })
-await e.reply('并 at 对方', false, { at: true })
+await e.reply('10 秒后撤回', true, { recallMsg: 10 })
 await e.group.sendMsg('主动发群消息')
 await Bot.sendGroupMsg(bot_id, group_id, '指定机器人发送')
 ```
 
----
+## 渲染
 
-## 五、渲染图片
-
-### 1. 模板
-
-`plugins/<插件名>/resources/<路径>.html`，语法为 art-template：
-
-```html
-<div id="container">
-  <h1>{{ title }}</h1>
-  <img src="{{ pluResPath }}img/logo.png" />
-</div>
-```
-
-### 2. 调用
-
-类形态（`JiuLiPlugin`）：
+模板放 `plugins/<插件>/resources/<路径>.html`（art-template）：
 
 ```js
-const img = await this.render('help/index', { title: '标题' })   // 返回可直接 e.reply 的图片（消息段/Buffer），失败为 false
-await e.reply(img || '渲染失败')
-
-const b64 = await this.renderBase64('help/index', data)          // 需要 base64:// 字符串时（自行拼消息段）
-await e.reply([segment.image(b64)])
+const img = await this.render('help/index', { title: '标题' })      // 可直接回复
+const b64 = await this.renderBase64('help/index', data)             // base64:// 字符串
+await e.runtime.render('插件目录名', 'help/index', data)             // 直接发送
 ```
 
-DSL / 通用：
-
-```js
-// 自动发送（返回 true / msgId）
-await e.runtime.render('插件目录名', 'help/index', { title: '标题' })
-
-// 只要 base64:// 字符串
-const base64 = await e.runtime.render('插件目录名', 'help/index', data, { retType: 'base64' })
-```
-
-长图分页（超过 `multiPageHeight` 自动切片，返回多张图片段）：
+长图分页与旧写法：
 
 ```js
 import puppeteer from '../../lib/puppeteer/puppeteer.js'
-const imgs = await puppeteer.screenshots('插件目录名/long/index', {
-  tplFile: './plugins/插件目录名/resources/long/index.html',
+
+const imgs = await puppeteer.screenshots('插件名/long/index', {
+  tplFile: './plugins/插件名/resources/long/index.html',
   saveId: 'index',
-  pluResPath: '../../../plugins/插件目录名/resources/',
-  ...data,
+  pluResPath: '../../../plugins/插件名/resources/',
+  pageHeight: 4000, ...data,
 })
 for (const img of imgs) await e.reply(img)
 ```
 
-现成的完整示例见 `plugins/demo/render-demo.js`（卡片 / 表格循环 / 本地图片 / 长图分页）与 `plugins/demo/demo-class.js`。
+模板里可用 `pluResPath` / `_res_path`（资源目录）。后端配置在 `renderers/puppeteer/config.yaml`
+（`chromiumPath`、`headless`、`restartNum`、`idleTime`），浏览器懒启动、空闲自动关闭。
+示例见 `plugins/demo/render-demo.js`。
 
-旧写法（兼容）：
-
-```js
-import puppeteer from '../../lib/puppeteer/puppeteer.js'
-const img = await puppeteer.screenshot('插件目录名/help/index', {
-  tplFile: './plugins/插件目录名/resources/help/index.html',
-  saveId: 'index',
-  pluResPath: './plugins/插件目录名/resources/',
-  ...data,
-})
-await e.reply(img)
-```
-
-### 3. 渲染后端
-
-内置 puppeteer（使用本机 Chrome/Edge）。配置 `renderers/puppeteer/config.yaml`：
-`chromiumPath`、`headless`、`restartNum`（截图 N 次重启浏览器）、`idleTime`（空闲分钟数后关闭浏览器）。
-
-自定义后端：新建 `renderers/<id>/index.js`：
+## 配置与数据
 
 ```js
-export default function (config) {
-  return {
-    id: 'my-renderer',
-    type: 'image',
-    support_script: true,
-    async render(name, data) {
-      // 返回 Buffer / Buffer[] / base64 字符串；返回 false 交给下一个后端
-    },
-  }
-}
+import makeConfig from '../../lib/plugins/config.js'          // 云崽写法
+const { config, configSave } = await makeConfig('demo', { enable: true })
+config.enable = false
+await configSave()                                            // → config/demo.yaml
 ```
 
----
+插件私有数据用 `this.dataDir`（`data/plugins/demo/`），或 `Bot.getMap('data/demo')`。
 
-## 六、配置与数据
-
-### 插件配置（`makeConfig`，与云崽一致）
+## 跨插件调用
 
 ```js
-import makeConfig from '../../lib/plugins/config.js'   // 旧路径
-// 或：import { makeConfig } from 'jiuli'  （后续提供）
-
-const { config, configSave } = await makeConfig('demo', { enable: true, tips: '你好' }, {}, { watch: true })
-config.tips = '新值'
-await configSave()
+handler('a.hello', (e, args) => `hello ${args}`)               // 注册
+const ret = await e.runtime.handler.call('a.hello', e, '参数')  // 调用
+e.runtime.handler.has('a.hello')                               // 是否存在
 ```
 
-配置文件落在 `config/demo.yaml`。
+类形态用 `super({ namespace: 'a', handler: [{ key: 'a.hello', fnc: 'hello' }] })`。
+`reject()` 机制与云崽一致。
 
-### 插件私有数据（JiuLi 新增）
-
-```js
-import { JiuLiPlugin } from 'jiuli'
-export default class Demo extends JiuLiPlugin {
-  async save() {
-    fs.writeFileSync(`${this.dataDir}/state.json`, '{}')   // data/plugins/demo/state.json
-  }
-}
-```
-
-或使用与云崽一致的 Map 持久化：`Bot.getMap('data/demo')`。
-
----
-
-## 六之二、分发钩子（JiuLi 原生扩展）
-
-旧体系没有的能力：在**分发前**统一拦截、在**分发后**统一收尾。钩子会在所有候选插件上按优先级依次执行。
-
-```js
-import { definePlugin, command, beforeMessage, afterMessage } from 'jiuli'
-
-export default definePlugin({
-  name: '审计',
-  apps: [
-    // 分发前：可做黑白名单、限流、审计；返回 false 直接拦截本次分发
-    beforeMessage(async e => {
-      if (e.msg === '#禁止') {
-        await e.reply('这条指令被拦截了')
-        return false            // 拦截：后续插件、规则都不会执行
-      }
-    }),
-    // 分发后：无论是否命中插件都会执行（统计、清理、审计日志）
-    afterMessage(e => {
-      logger.mark(`[审计] ${e.user_id} 发了 ${e.msg}`)
-    }),
-    command(/^#正常$/, async e => e.reply('ok')),
-  ],
-})
-```
-
-类形态写法（方法与选项同名即可）：
-
-```js
-import { JiuLiPlugin } from 'jiuli'
-
-export default class Audit extends JiuLiPlugin {
-  constructor() {
-    super({
-      name: '审计',
-      event: 'message',
-      hooks: { beforeMessage: 'onBefore', afterMessage: 'onAfter' },
-    })
-  }
-  async onBefore(e) { /* 返回 false 可拦截 */ }
-  async onAfter(e) { /* 收尾 */ }
-  async onLoad() { logger.mark('插件加载完成') }
-  async onUnload() { clearInterval(this.timer) }   // 热重载/卸载时清理资源
-}
-```
-
-> 钩子必须**显式声明**（DSL 的 `beforeMessage(...)` 或类形态的 `hooks: {...}`），
-> 不会因为插件里恰好有同名方法就被当成钩子调用。
-
-## 六之三、生命周期与配置
-
-```js
-export default class Demo extends JiuLiPlugin {
-  async onLoad() {
-    // 加载完成：建目录、起定时器、预热缓存（旧插件继续用 init()）
-  }
-  async onUnload() {
-    // 卸载/热重载前：清理定时器、关闭连接（避免热重载后资源重复）
-  }
-  async init() {
-    // 插件配置：首次调用用默认值生成 config/<插件名>.yaml
-    const { config, configSave } = await this.useConfig({ enable: true, tips: '你好' })
-    config.tips = '新值'
-    await configSave()
-  }
-}
-```
-
-## 七、跨插件调用
-
-```js
-// 注册（类形态）
-super({ name: 'A', handler: [{ key: 'a.hello', fnc: 'hello' }], namespace: 'a' })
-async hello(e, args) { return `hello ${args}` }
-
-// 注册（DSL）
-handler('a.hello', (e, args) => `hello ${args}`)
-
-// 调用（任意插件）
-const ret = await e.runtime.handler.call('a.hello', e, '参数')
-const exists = e.runtime.handler.has('a.hello')
-```
-
-handler 的 `reject()` 机制与云崽一致（`fn(e, args, reject)`，调用 reject 表示放弃结果）。
-
----
-
-## 八、适配器插件
+## 适配器
 
 ```js
 Bot.adapter.push({
-  id: 'QQ',                 // 平台
-  name: 'MyAdapter',        // 适配器名
-  path: 'MyAdapter',        // 唯一路径（去重）
+  id: 'QQ', name: 'MyAdapter', path: 'MyAdapter',   // path 唯一，用于去重
   async load() {
-    // 建立连接，然后注册机器人对象
-    const bot = {
-      adapter: this,
-      uin, nickname, version,
-      fl: new Map(), gl: new Map(), gml: new Map(),
-      stat: { start_time: Date.now() / 1000 },
-      pickFriend: id => contact,
-      pickGroup: id => contact,
-      pickMember: (g, u) => contact,
-    }
-    Bot[uin] = bot
+    Bot[uin] = { adapter: this, uin, fl: new Map(), gl: new Map(), gml: new Map(),
+                 pickFriend: id => c, pickGroup: id => c, pickMember: (g, u) => c }
     Bot.uin.push(uin)
-    Bot.em(`connect.${uin}`, { self_id: uin, bot })
-
-    // 收到事件时（OneBot11 示例）
-    Bot.em('message.group.normal', {
-      post_type: 'message', message_type: 'group', sub_type: 'normal',
-      self_id, user_id, group_id, message_id, raw_message,
-      message: [{ type: 'text', text: '#帮助' }],
-      sender: { user_id, nickname, card },
-    })
+    Bot.em(`connect.${uin}`, { self_id: uin, bot: Bot[uin] })
   },
 })
 ```
 
-`contact` 需提供 `sendMsg(msg)`、`recallMsg(id)`、`makeForwardMsg(msg)`、`getInfo()` 等。
-`Bot.em` 会逐级 emit（`message.group.normal` → `message.group` → `message`），并自动补全事件字段。
+`Bot.em` 逐级派发（`message.group.normal` → `message.group` → `message`）并补全事件字段。
+参考 `plugins/adapter/mock.js`。
 
-调试用适配器见 `plugins/adapter/mock.js/`。
+## 调试
 
----
-
-## 九、调试与测试
-
-- `node .` 直接启动；`plugins/adapter/mock.js` 会打印机器人发出的消息
-- `JIULI_MOCK_STDIN=1 node .` 后，stdin 每行一个 JSON 事件即可模拟收发
+- `node .` 前台运行，终端直接敲指令；`plugins/adapter/mock.js` 打印机器人发出的消息
+- `JIULI_MOCK_STDIN=1 node .` 后，stdin 每行一个 JSON 事件
 - 日志等级：`config/config/bot.yaml → log_level: debug`
-- 性能指标：`#玖璃性能`（示例插件提供）或 `import { metrics } from 'jiuli'; metrics.summary()`
-- 慢插件告警阈值：`config/jiuli.yaml → perf.slow_plugin_ms`
-
-## 十、常见问题
-
-**Q：插件加载报 `Cannot find package 'xxx'`？**
-在插件目录执行 `pnpm add xxx`（或根目录 `pnpm i`）；JiuLi 会汇总缺失依赖并打印提示。
-
-**Q：`this.e` 是 undefined？**
-定时任务（`task.fnc`）与 `init()` 中没有事件对象，请不要在其中调用 `this.reply`。
-
-**Q：修改插件没生效？**
-热重载覆盖：新增 js、修改 js（含 `index.js` 与 `apps/` 深层文件）、删除 js、新建插件目录——改完等 2 秒即可。
-若没生效：`config/config/bot.yaml → file_watch` 是否为 `false`（关闭了文件监听）；
-或直接用 `#重载`（全部）／`#重载 状态`（按关键词）手动重载。
-
-**Q：`#状态` 等云崽内置指令没有？**
-云崽的 `plugins/system`、`plugins/other` 是插件而非内核功能，把对应目录复制过来即可。
+- `#玖璃性能`（示例插件提供）或 `import { metrics } from 'jiuli'` 看耗时排行
+- 改文件等 2 秒自动热重载；没生效看 `file_watch` 是否为 false，或 `#重载`

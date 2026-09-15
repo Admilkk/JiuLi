@@ -39,9 +39,8 @@ export async function start() {
   const g = globalThis as any
   g.start_type ||= 'internal'
 
-  /** 默认只保留 10 帧调用栈，插件报错时看不到真正的调用位置，这里放大 */
+  // 默认只保留 10 帧调用栈，定位不到插件报错位置
   Error.stackTraceLimit = 50
-  /** 时区与标题 */
   process.env.TZ ??= 'Asia/Shanghai'
   let realVersion = '0.0.0'
   try {
@@ -68,7 +67,7 @@ export async function start() {
   logger.mark(logger.yellow(`JiuLi v${realVersion} 启动中…`))
   logger.info(logger.cyan(`插件可见的框架标识：${frameworkName} v${cfg.frameworkVersion}（config/jiuli.yaml → compat）`))
 
-  /** 捕获未处理的错误（id 用短名，避免被日志对齐截断成 [unhandle.]） */
+  // id 用短名，避免被日志对齐截断
   const fatalEvents: Array<[string, string]> = [
     ['uncaughtException', 'Crash'],
     ['unhandledRejection', 'Reject'],
@@ -104,10 +103,8 @@ export async function start() {
 export const RESTART_CODE = 255
 
 /**
- * 守护进程：在同一个终端内拉起/重启主进程（internal 模式默认走这里）
- *
- * - 主进程调用 `#重启` 时以退出码 255 退出 → 守护进程立即在同一终端重新拉起（不开新窗口）
- * - 主进程正常退出（`#停止`）或崩溃 → 守护进程结束，不会无限重启
+ * 守护进程：在同一终端内拉起/重启主进程
+ * 主进程以退出码 255 退出时立即重新拉起；正常退出或崩溃则结束守护。
  */
 export async function supervise() {
   const { spawn } = await import('node:child_process')

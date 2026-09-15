@@ -1,11 +1,7 @@
 /**
  * Runtime（e.runtime）
- *
- * 与云崽的差异（性能改进）：
- * - TRSS 在每条消息都 await Runtime.init(e)，内部执行 MysInfo.initCache() 与
- *   NoteUser.create(e)（redis + DB 操作），即使这条消息没有任何插件处理。
- * - JiuLi 默认只做一次轻量对象创建；只有当第三方（如 genshin 生态）通过
- *   Runtime.use() 注册了扩展时，才会执行其 user 初始化，且可由插件按需调用。
+ * 与云崽的差异：默认不做 MysInfo / NoteUser 初始化，仅在第三方通过 Runtime.use()
+ * 注册了扩展（eagerUser）时才执行用户初始化。
  */
 import type { JiuLiEvent, RenderOptions } from './types.js'
 import cfg from './config/index.js'
@@ -23,7 +19,7 @@ export interface RuntimeProvider {
   createMysApi?: (uid: any, ck: any, option: any, isSr: boolean, runtime: Runtime) => any
 }
 
-/** genshin 生态的懒加载入口（存在时启用，不存在时全为 undefined） */
+/** genshin 生态懒加载入口，不存在时各项为 undefined */
 const genshin: Record<string, any> = { loaded: false }
 
 async function loadGenshin() {
@@ -91,7 +87,7 @@ export default class Runtime {
     return runtime
   }
 
-  /** 用户信息初始化（懒） */
+  /** 用户信息懒初始化，重复调用复用同一 Promise */
   ready() {
     this._userReady ??= (async () => {
       for (const provider of Runtime.providers) if (provider.initUser) await provider.initUser(this.e, this)
@@ -140,7 +136,7 @@ export default class Runtime {
     return genshin.MysUser
   }
 
-  /** 旧生态用户代理（与云崽行为一致，仅在 genshin 存在时生效） */
+  /** 包装 NoteUser，自动补上 e.game 参数（云崽行为） */
   async initUser() {
     const g = await loadGenshin()
     if (!g.NoteUser) return
@@ -210,14 +206,7 @@ export default class Runtime {
     return new genshin.MysApi(uid, ck, option)
   }
 
-  /**
-   * 渲染（兼容云崽 e.runtime.render）
-   * @param pluginName plugin key
-   * @param path html 文件路径，相对于 plugin resources 目录
-   * @param data 渲染数据
-   * @param cfg.retType default/空 自动发送图片；msgId 返回消息 id；base64 返回 base64
-   * @param cfg.beforeRender({data}) 可改写渲染的 data
-   */
+  /** 渲染并发送图片，兼容云崽 e.runtime.render；cfg 见 RenderOptions */
   async render(pluginName: string, path: string, data: any = {}, cfgIn: RenderOptions = {}) {
     const { default: renderService } = await import('./render/index.js')
 
@@ -227,6 +216,7 @@ export default class Runtime {
 
     await (globalThis as any).Bot.mkdir(`temp/html/${pluginName}/${filePath}`)
 
+    // 模板产物位于 temp/html/<插件>/<子路径>/，故按层级数回退到 plugins/ 下
     const up = '../'.repeat(paths.length)
     const pluResPath = `../../../${up}plugins/${pluginName}/resources/`
     const miaoResPath = `../../../${up}plugins/miao-plugin/resources/`

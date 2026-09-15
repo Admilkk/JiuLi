@@ -1,6 +1,4 @@
-/**
- * common 工具（兼容云崽 lib/common/common.js）
- */
+/** common 工具（兼容云崽 lib/common/common.js） */
 import fs from 'node:fs'
 
 /** 发送私聊消息 */
@@ -8,12 +6,11 @@ export function relpyPrivate(user_id: any, msg: any, bot_id?: any) {
   return (globalThis as any).Bot.sendFriendMsg(bot_id, user_id, msg)
 }
 
-/** 休眠 */
 export function sleep(...args: any[]) {
   return (globalThis as any).Bot.sleep(...args)
 }
 
-/** 下载保存文件 */
+/** 下载失败时记录日志并返回 false */
 export async function downFile(url: string, file: string, opts?: any) {
   try {
     return await (globalThis as any).Bot.download(url, file, opts)
@@ -29,7 +26,7 @@ export function mkdirs(dirname: string) {
   return true
 }
 
-/** 制作转发消息 */
+/** 优先使用群/好友会话自带的转发实现 */
 export function makeForwardMsg(e: any, msg: any = [], dec?: string) {
   const forwardMsg = []
   if (dec) forwardMsg.push({ message: dec })

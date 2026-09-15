@@ -1,10 +1,4 @@
-/**
- * 事件监听器基类与加载器
- *
- * 兼容云崽 lib/listener/listener.js：
- * - 用户可在 lib/events/ 下新增 .js 监听器（默认导出 EventListener 子类）
- * - 适配器在 Bot.adapter 中注册，load() 时被调用
- */
+/** 事件监听器基类与加载器（兼容云崽 lib/listener/listener.js） */
 import fs from 'node:fs/promises'
 import util from './util.js'
 import PluginsLoader from './loader.js'
@@ -28,7 +22,6 @@ export default class EventListener {
 }
 
 export class ListenerLoader {
-  /** 加载监听事件与适配器 */
   async load() {
     const Bot = (globalThis as any).Bot
 

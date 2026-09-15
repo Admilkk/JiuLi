@@ -1,8 +1,6 @@
 /**
- * 工具层（兼容云崽 util / Bot.* 的工具方法面）
- *
- * Bot 的 Proxy 会把未命中的属性回落到 util，因此这里的方法
- * 同时构成 Bot.fsStat / Bot.Buffer / Bot.String / Bot.sleep ... 的兼容实现
+ * 工具层（兼容云崽 util / Bot.* 工具方法面）
+ * Bot 的 Proxy 会将未命中的属性回落到这里，故这些方法同时是 Bot.fsStat / Bot.String 等的实现。
  */
 import fs from 'node:fs/promises'
 import timers from 'node:timers/promises'
@@ -23,10 +21,7 @@ class Util {
     return text.length > length ? `${text.slice(0, length)}…(${text.length}字)` : text
   }
 
-  /**
-   * 描述消息内容（日志用）
-   * 支持字符串 / 单个消息段 / 消息段数组，输出如 `"你好" + @10001 + 图片(11.5KB)`
-   */
+  /** 描述消息内容（日志用），输出如 `"你好" + @10001 + 图片(11.5KB)` */
   describeMsg(msg: any): string {
     if (msg === undefined || msg === null) return '(空)'
     const items = Array.isArray(msg) ? msg : [msg]
@@ -386,7 +381,7 @@ class Util {
     if (typeof data === 'string') {
       /* 保持原样 */
     } else if (data instanceof Error) {
-      /** 错误对象不截断，保证调用栈完整（排查插件报错时很关键） */
+      /** 错误对象不截断，保证调用栈完整 */
       data = nodeUtil.inspect(data, {
         depth: 10,
         colors: true,

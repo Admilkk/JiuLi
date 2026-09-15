@@ -1,15 +1,6 @@
 /**
- * 日志系统
- *
- * 兼容云崽的 logger 形态：
- * - logger.<level>(...args)  带 [log_align] 前缀
- * - logger.mark / trace / debug / info / warn / error / fatal
- * - logger.red / green / blue / yellow / cyan / magenta / gray ... 颜色函数（chalk）
- * - logger.logger.{defaultLogger,commandLogger,errorLogger}
- *   · defaultLogger: trace/debug/info
- *   · commandLogger: mark/warn
- *   · errorLogger:   error/fatal
- *   · 每个 logger 对象带 isLevelEnabled(level) 与全部等级方法
+ * 日志系统，兼容云崽 logger 形态
+ * logger.logger.{defaultLogger,commandLogger,errorLogger} 各只放行自己的等级，并统一提供 isLevelEnabled。
  */
 import { Chalk } from 'chalk'
 import fs from 'node:fs'
@@ -43,7 +34,7 @@ let logLevel: LogLevel = 'info'
 let logDir = 'logs'
 let writeFile = true
 
-/** 文件写入（非阻塞：按天分文件 + 流式追加） */
+/** 流式追加写日志，按天分文件 */
 class FileWriter {
   streams = new Map<string, fs.WriteStream>()
 
@@ -83,7 +74,7 @@ function timeStr() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
 }
 
-/** 去掉 ANSI 颜色码（写文件用） */
+/** 写文件前去除 ANSI 颜色码 */
 function stripColor(str: string) {
   // eslint-disable-next-line no-control-regex
   return str.replace(/\u001b\[[0-9;]*m/g, '')
@@ -124,7 +115,7 @@ function isEnabled(level: string) {
   return LEVEL_RANK[level] >= LEVEL_RANK[logLevel]
 }
 
-/** 通道：只放行属于本通道的等级，并做等级过滤 */
+/** 只放行本通道包含的等级 */
 function createChannel(...levels: string[]): LoggerChannel {
   const channel: any = {}
   channel.isLevelEnabled = (level: string) => levels.includes(level) && isEnabled(level)
@@ -141,7 +132,7 @@ const defaultLogger = createChannel('trace', 'debug', 'info')
 const commandLogger = createChannel('mark', 'warn')
 const errorLogger = createChannel('error', 'fatal')
 
-/** 全等级通道（logger.logger.<level> 直通） */
+/** 全等级直通通道，logger.logger 同时挂载它和三个子通道 */
 const anyLogger: LoggerChannel = (() => {
   const channel: any = {
     isLevelEnabled: (level: string) => isEnabled(level),
@@ -184,7 +175,6 @@ logger.logger = Object.assign(anyLogger, {
   errorLogger,
 })
 
-/** 带 [log_align] 前缀的等级方法 */
 const levels: LogLevel[] = ['trace', 'debug', 'info', 'mark', 'warn', 'error', 'fatal']
 for (const level of levels) {
   ;(logger as any)[level] = (...args: any[]) => (anyLogger as any)[level](...args)
@@ -202,7 +192,7 @@ export function setLogDir(dir: string) {
   logDir = dir
 }
 
-/** 按配置初始化日志等级（TRSS 在 init 阶段调用） */
+/** 按配置初始化日志等级 */
 export function setLog(level?: LogLevel) {
   logger.setLevel(level || (globalThis as any).cfg?.bot?.log_level || 'info')
 }

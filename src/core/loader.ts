@@ -1,12 +1,6 @@
 /**
  * 插件加载 + 消息分发
- *
- * 相对 TRSS-Yunzai 的改进（保持语义不变）：
- * 1. 事件索引：按插件 event 的第一段（post_type）分桶，避免每条消息全量遍历插件
- * 2. 单实例分发：accept 与 rule 复用同一插件实例（可在 config/jiuli.yaml 关闭）
- * 3. 消息计数改为内存聚合 + 定时批量写回（默认 1s，0 则实时）
- * 4. 插件耗时统计（慢插件日志 + #性能 指令数据）
- * 5. 加载失败回滚、任务去重、热重载逻辑保持与云崽一致
+ * 相对 TRSS 的差异：事件按 post_type 分桶索引、accept 与 rule 复用同一插件实例、消息计数内存聚合后批量写回。
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -22,20 +16,16 @@ import { logger } from './log.js'
 import metrics from './metrics.js'
 import type { JiuLiEvent, PluginEntry } from './types.js'
 
-/** 全局变量兼容 */
+/** 兼容旧插件直接使用全局 plugin */
 ;(globalThis as any).plugin = plugin
 
-/** 简易 truncate（避免核心依赖 lodash） */
+/** 简易 truncate，避免核心依赖 lodash */
 function truncate(str: string, length: number) {
   if (!str) return ''
   return str.length > length ? `${str.slice(0, length)}...` : str
 }
 
-/**
- * 判断发送结果是否失败
- * 各适配器返回格式不一：云崽系常见 { message_id, error: [] }（空数组表示成功），
- * 也有返回 Error 实例、字符串或 { error: Error } 的，这里统一处理
- */
+/** 各适配器返回格式不一：{ error: [] } 空数组表示成功，也可能返回 Error 实例或字符串 */
 function hasSendError(res: any): boolean {
   if (!res || typeof res !== 'object') return false
   const err = res.error ?? res.err
@@ -45,7 +35,6 @@ function hasSendError(res: any): boolean {
   return Boolean(err)
 }
 
-/** 从发送结果里提取可读的失败原因 */
 function describeSendError(res: any): string {
   const err = res?.error ?? res?.err
   const first = Array.isArray(err) ? err[0] : err
@@ -62,7 +51,7 @@ function isEmptyObject(obj: any) {
 }
 
 class PluginsLoader {
-  /** 分发列表（赋值时会重建事件索引，兼容插件直接替换 priority 的用法） */
+  /** 赋值时重建事件索引，兼容插件直接替换 priority 的用法 */
   private _priority: PluginEntry[] = []
   get priority(): PluginEntry[] {
     return this._priority
@@ -74,22 +63,20 @@ class PluginsLoader {
 
   handler: Record<string, any> = {}
   task: any[] = []
-  /** 插件目录（JIULI_PLUGINS_DIR 可指定，测试/多实例时隔离） */
+  /** JIULI_PLUGINS_DIR 可指定，用于测试/多实例隔离 */
   dir = process.env.JIULI_PLUGINS_DIR || 'plugins'
 
   /** 事件索引：post_type → 插件条目 */
   eventIndex = new Map<string, PluginEntry[]>()
-  /** 没有插件类的文件（适配器 / 纯胶水文件）：#重载 时跳过，避免重复副作用 */
+  /** 无插件类的文件（适配器/胶水），#重载 时跳过以免重复副作用 */
   inertFiles = new Set<string>()
-  /** 每个插件的 init 实例（用于卸载时回调 onUnload） */
+  /** 插件 init 实例，卸载时用于回调 onUnload */
   private initInstances = new Map<string, any>()
-  /** 命令冷却cd */
   groupCD: Record<string, boolean> = {}
   singleCD: Record<string, boolean> = {}
   /** 消息去重（1s） */
   msgThrottle: Record<string, boolean> = {}
 
-  /** 插件监听 */
   watcher: Record<string, any> = {}
   taskMap = new Map<string, Set<any>>()
   pluginCountMap = new Map<string, number>()
@@ -107,7 +94,7 @@ class PluginsLoader {
   /** 绝区零前缀 */
   zzzReg = /^#?(%|％|绝区零|绝区)+/
 
-  /** 计数缓冲（内存聚合 + 定时写回） */
+  /** 计数缓冲：内存聚合 + 定时写回 */
   private countBuffer = new Map<string, number>()
   private countTimer?: NodeJS.Timeout
 
@@ -133,7 +120,7 @@ class PluginsLoader {
     return ret
   }
 
-  /** 加载（isRefresh 时先卸载再加载） */
+  /** isRefresh 时先卸载再加载 */
   async load(isRefresh = false) {
     if (isRefresh) {
       const keys = new Set([...this.priority.map(i => i.key), ...this.taskMap.keys(), ...this.pluginCountMap.keys()])
@@ -160,7 +147,6 @@ class PluginsLoader {
     this.createTask()
     this.buildEventIndex()
 
-    /** 汇总：插件数 / 规则数 / 监听数 / 任务数 / 耗时 */
     const rules = this.priority.reduce((n, i) => n + (i.plugin.rule?.length || 0), 0)
     const listeners = this.priority.filter(i => i.plugin.accept || i.plugin.event !== 'message').length
     util.makeLog(
@@ -168,10 +154,7 @@ class PluginsLoader {
       `插件 ${logger.green(String(this.pluginCount))} 个 · 规则 ${rules} 条 · 事件监听 ${listeners} 个 · 定时任务 ${this.task.length} 个 · 用时 ${util.getTimeDiff(loadStart)}`,
       'Plugin',
     )
-    /**
-     * 并行导入下记录的是"开始加载 → 该插件就绪"的耗时（含公共依赖解析开销）。
-     * 最后就绪的几个即启动关键路径，不代表插件本身有问题，明细放 debug。
-     */
+    /** 并行导入下记录的是"开始加载 → 该插件就绪"（含公共依赖解析开销），不代表插件自身有问题 */
     const sorted = Object.entries(this.load_time).sort((a, b) => b[1] - a[1])
     const slow = sorted.filter(([, t]) => t > 200).slice(0, 8)
     if (slow.length)
@@ -187,11 +170,9 @@ class PluginsLoader {
     /** 优先级排序 */
     this.priority.sort((a, b) => a.priority - b.priority)
 
-    /** 热重载（监听整个 plugins/ 目录） */
     this.watchPlugins()
   }
 
-  /** 构建事件索引 */
   buildEventIndex() {
     this.eventIndex = new Map()
     for (const entry of this.priority) {
@@ -203,7 +184,7 @@ class PluginsLoader {
     }
   }
 
-  /** 候选插件：事件索引 + 通配桶 */
+  /** 候选插件：事件索引命中桶 + 通配桶 */
   private candidates(e: JiuLiEvent) {
     if (cfg.getPerf().event_index === false) return this.priority
     const index = this.eventIndex
@@ -218,7 +199,7 @@ class PluginsLoader {
     const start_time = Date.now()
     let success = true
     this.pluginCountMap.set(file.name, 0)
-    /** 标记当前加载的插件：Bot 据此记录该插件注册的 express 路由与 WS 路径 */
+    /** 标记当前加载的插件，Bot 据此登记该插件注册的 express 路由与 WS 路径 */
     const prevLoading = (globalThis as any).__jiuliLoading
     ;(globalThis as any).__jiuliLoading = file.name
     try {
@@ -236,7 +217,7 @@ class PluginsLoader {
       const stack = String(error?.stack || '')
       if (packageErr && stack.includes('Cannot find package')) {
         packageErr.push({ error, file })
-        /** 目录里有自己的 package.json 时会断掉 'jiuli' 的解析，给出明确修法 */
+        /** 插件目录自带 package.json 会断掉对 'jiuli' 的解析，给出修法 */
         if (stack.includes("Cannot find package 'jiuli'"))
           util.makeLog(
             'error',
@@ -248,7 +229,6 @@ class PluginsLoader {
       }
     } finally {
       ;(globalThis as any).__jiuliLoading = prevLoading
-      /** 没有任何插件类的文件（适配器 / 纯胶水文件）：#重载 时不必再导入 */
       if (!this.pluginCountMap.get(file.name)) this.inertFiles.add(file.name)
     }
     this.load_time[file.name] = Date.now() - start_time
@@ -260,20 +240,15 @@ class PluginsLoader {
     this.pluginCount++
     this.pluginCountMap.set(file.name, (this.pluginCountMap.get(file.name) ?? 0) + 1)
 
-    /** 初始化、定时任务实例 */
     const init = new p()
-    /** 插件目录名（渲染/数据目录定位用） */
+    /** 插件目录名，渲染/数据目录定位用 */
     init.__key = String(file.name).split('/')[0]
-    /** 生命周期：原生插件可覆盖 onLoad()（旧插件继续用 init()） */
     this.initInstances.set(file.name, init)
     util.makeLog('debug', `加载插件 [${file.name}][${init.name}]`, 'Plugin')
-    /** 执行初始化，返回 return 则跳过加载 */
+    /** init() 返回 "return" 表示跳过加载 */
     if (init.init && (await init.init()) === 'return') return
-    /** 设置定时任务 */
     this.collectTask(init.task, init.name, file.name)
-    /** 处理消息实例（用于规则初始化） */
     const instance = init
-    /** 初始化正则表达式 */
     if (instance.rule)
       for (const i of instance.rule) {
         if (!(i.reg instanceof RegExp)) i.reg = new RegExp(i.reg)
@@ -333,21 +308,15 @@ class PluginsLoader {
 
   async deal(e: JiuLiEvent) {
     this.pushCount(e, 'receive', e.message)
-    /** 检查黑白名单 */
     if (!this.checkBlack(e)) return
     const groupCfg = cfg.getGroup(e.self_id, e.group_id)
-    /** 冷却 */
     if (!this.checkLimit(e, groupCfg)) return
-    /** 处理事件 */
     this.dealEvent(e, groupCfg)
-    /** 设置冷却 */
     if (e.only_reply_at) this.setLimit(e, groupCfg)
-    /** 处理回复 */
     this.reply(e)
-    /** 注册 runtime（轻量挂载，重活懒加载） */
     if (cfg.getCompat().runtime !== false) Runtime.attach(e)
 
-    /** 收到消息（谁、在哪、说了什么）：日志关闭或等级不够时不做任何字符串拼接 */
+    /** 日志关闭或等级不足时不做任何字符串拼接 */
     const scene = util.describeScene(e)
     const msgLength = Number(cfg.bot.log_msg_length ?? 60)
     const logMsg = cfg.bot.log_msg !== false && util.isLogLevelEnabled('info')
@@ -367,13 +336,12 @@ class PluginsLoader {
     }
     this.pushRecent(this.recent.receive, recentItem)
 
-    /** 候选插件 */
     const priority: PluginEntry[] = []
     for (const i of this.candidates(e)) {
       if (this.checkDisable({ plugin: i.plugin, e }, groupCfg) && this.filtEvent(e, i.plugin)) priority.push(i)
     }
 
-    /** 实例缓存（单实例分发） */
+    /** 单实例分发时的实例缓存 */
     const onceInstance = cfg.getPerf().once_instance !== false
     const instanceCache = new Map<PluginEntry, any>()
     const createInstance = (entry: PluginEntry) =>
@@ -389,9 +357,8 @@ class PluginsLoader {
     }
 
     for (const i of priority) {
-      /** 上下文 hook */
       if (!i.plugin.getContext) continue
-      /** 探针对象：只为拿到 conKey（插件名 + 事件），避免为每个插件实例化 */
+      /** 探针对象，仅为取 conKey（插件名 + 事件），避免为每个插件实例化 */
       const probe = Object.create(i.class.prototype)
       probe.name = i.plugin.name
       probe.e = e
@@ -410,11 +377,8 @@ class PluginsLoader {
       }
     }
 
-    /** 是否只关注主动at */
     if (!e.only_reply_at) return
 
-    // 判断是否是星铁命令，若是星铁命令则标准化处理
-    // e.isSr = true，且命令标准化为 #星铁 开头
     Object.defineProperty(e, 'isSr', {
       get: () => e.game === 'sr',
       set: (v: boolean) => (e.game = v ? 'sr' : 'gs'),
@@ -433,10 +397,9 @@ class PluginsLoader {
       e.msg = String(e.msg).replace(this.zzzReg, '#绝区零')
     }
 
-    /** 原生插件钩子：分发前（任一返回 false 即拦截本次分发） */
+    /** 原生插件钩子：分发前，任一 beforeMessage 返回 false 即拦截本次分发 */
     if (!(await this.runHooks(e, priority, 'beforeMessage'))) return
     try {
-      /** 优先执行 accept */
       for (const i of priority)
         if (i.plugin.accept) {
           const res = await getInstance(i).accept(e)
@@ -450,15 +413,13 @@ class PluginsLoader {
           }
         }
 
-      /** 记录"命中了指令规则但没有插件响应"的情况，用于最后给出提示 */
+      /** 记录"命中指令规则但无插件响应"的情况，用于最后给出提示 */
       const commandMatched: string[] = []
       for (const i of priority) {
         if (!i.plugin.rule) continue
         for (const v of i.plugin.rule) {
-          /** 判断事件 */
           if (v.event && !this.filtEvent(e, v)) continue
 
-          /** 正则匹配 */
           const regStr = String(v.reg)
           if (!(v.reg as RegExp).test(String(e.msg))) continue
 
@@ -467,10 +428,9 @@ class PluginsLoader {
           e.logFnc = `${logger.blue(`[${i.name}(${fncName})]`)}`
           util.markPlugin(e, i.name, i.key)
           recentItem.matched = `${i.name} <${i.key}> → ${fncName}`
-          /** 指令型规则（不能匹配空串）才算"用户想执行指令" */
+          /** 指令型规则（不匹配空串）才算"用户想执行指令" */
           if (!(v.reg as RegExp).test('')) commandMatched.push(`${i.name}`)
 
-          /** 命中日志：插件 / 来源文件 / 正则 / 执行方法 / 优先级 */
           util.makeLog(
             v.log === false ? 'debug' : 'info',
             `中 ▶ ${logger.green.bold(i.name)} ${logger.gray(`<${i.key}>`)} · 规则 ${logger.gray(regStr)} · 方法 ${logger.cyan(
@@ -479,7 +439,6 @@ class PluginsLoader {
             'Plugin',
           )
 
-          /** 判断权限 */
           if (!this.filtPermission(e, v))
             util.makeLog('info', `${i.name} · 权限不足（需要 ${v.permission}）`, 'Plugin')
           else
@@ -520,8 +479,7 @@ class PluginsLoader {
         util.makeLog('debug', `未命中插件 · ${scene} · ${util.truncate(e.msg || util.describeMsg(e.message))}`, 'Msg')
 
       /**
-       * 命中了"指令型规则"（正则不匹配空串）但没有任何插件响应时给出提示，
-       * 避免像"非主人使用主人指令 → 插件内部 return false"这样静默无响应，让人以为框架坏了
+       * 命中指令型规则却无插件响应时提示一次，避免静默无响应被误认为框架故障
        */
       if (
         commandMatched.length &&
@@ -538,25 +496,24 @@ class PluginsLoader {
             ? `这条指令没有被执行（参数或触发条件不符）· 可发 #插件列表 查看可用指令`
             : `这条指令没有响应 · 如果它是主人专属指令，请先发 #设置主人 绑定主人账号；也可能是参数不符`
           util.makeLog('info', `提示无响应 · ${util.truncate(e.msg, 20)} · 命中 ${commandMatched.join('/')}`, 'Msg')
-          /** 提示由框架发出，避免日志里错误归属到最后一个匹配到的插件 */
+          /** 提示由框架发出，避免日志错误归属到最后一个匹配到的插件 */
           e.logPlugin = 'JiuLi'
           await e.reply?.(tip)
         }
       }
   
     } finally {
-      /** 原生插件钩子：分发后（无论是否命中都会执行） */
+      /** 原生插件钩子：分发后，无论是否命中都会执行 */
       await this.runHooks(e, priority, 'afterMessage')
     }
   }
 
-  /** "无响应提示"节流（同一用户 10 秒内只提示一次） */
+  /** 同一用户 10 秒内只提示一次"无响应" */
   private hintThrottle: Record<string, number> = {}
 
   /**
    * 执行原生插件钩子（beforeMessage / afterMessage）
-   * 类形态：定义同名方法即可；DSL 形态：beforeMessage(fn) / afterMessage(fn) 会绑定为同名方法
-   * beforeMessage 返回 false 表示拦截本次分发
+   * 类形态定义同名方法即可；DSL 形态的 beforeMessage(fn) / afterMessage(fn) 会绑定为同名方法
    */
   private async runHooks(e: JiuLiEvent, entries: PluginEntry[], name: 'beforeMessage' | 'afterMessage') {
     for (const entry of entries) {
@@ -575,7 +532,7 @@ class PluginsLoader {
     return true
   }
 
-  /** 过滤事件 */
+  /** 事件表达式与实际事件逐段比对，支持 * 通配 */
   filtEvent(e: JiuLiEvent | null, v: any) {
     if (!v.event) return false
     let cache = this.eventCache.get(v)
@@ -591,7 +548,7 @@ class PluginsLoader {
     return v.event === mappedEvent.join('.')
   }
 
-  /** 判断权限 */
+  /** 权限检查；master/owner/admin 校验失败时直接回复用户 */
   filtPermission(e: JiuLiEvent, v: any) {
     if (!v.permission || e.isMaster) return true
 
@@ -622,7 +579,7 @@ class PluginsLoader {
       .trim()
   }
 
-  /** 处理事件，加入自定义字段 */
+  /** 解析消息，补齐 e.msg / e.img / e.isGroup / e.isMaster 等派生字段 */
   dealEvent(e: JiuLiEvent, groupCfg?: any) {
     if (e.message)
       for (const i of e.message) {
@@ -673,7 +630,7 @@ class PluginsLoader {
 
     if (e.user_id && cfg.master[e.self_id]?.includes(String(e.user_id))) e.isMaster = true
 
-    /** 只关注主动at msg处理 */
+    /** 群聊未 at 机器人时，剥掉消息开头的 bot 别名并标记 hasAlias */
     if (e.msg && e.isGroup && !e.atBot) {
       groupCfg ||= cfg.getGroup(e.self_id, e.group_id)
       const alias = groupCfg.botAlias
@@ -688,7 +645,7 @@ class PluginsLoader {
     e.only_reply_at = this.onlyReplyAt(e, groupCfg)
   }
 
-  /** 处理回复，捕获发送失败异常 */
+  /** 包装 e.reply：拼装 at/引用、记录发送日志，并在失败时捕获异常 */
   reply(e: JiuLiEvent) {
     if (!e.reply?.bind) return
     const reply = e.reply.bind(e)
@@ -719,7 +676,7 @@ class PluginsLoader {
         res = { error: [err] }
       }
 
-      /** 发出消息日志：目标 / 内容 / 由哪个插件发出 / 耗时 */
+      /** 日志用带色目标，最近消息记录用无色的 targetPlain */
       const targetPlain =
         e.isGroup || e.group_id ? `群 ${e.group_name || ''}(${e.group_id})` : `好友 ${e.user_id}`
       const target = e.isGroup || e.group_id
@@ -743,7 +700,7 @@ class PluginsLoader {
         content,
         plugin: e.logPlugin || '',
       })
-      /** 标记"本事件已有插件尝试回复"，用于判断是否需要给"无响应"提示 */
+      /** 标记本事件已有回复，供"无响应"提示判断 */
       e.__replied = true
 
       if (recallMsg > 0 && res?.message_id) {
@@ -861,7 +818,6 @@ class PluginsLoader {
   /* ==================== 过滤/冷却 ==================== */
 
   checkLimit(e: JiuLiEvent, config?: any) {
-    /** 禁言中 */
     if (e.group && (e.group.mute_left > 0 || (e.group.all_muted && !e.group.is_admin && !e.group.is_owner)))
       return false
     if (!e.message || e.isPrivate) return true
@@ -871,6 +827,7 @@ class PluginsLoader {
     if (config.groupCD && this.groupCD[e.group_id as any]) return false
     if (config.singleCD && this.singleCD[`${e.group_id}.${e.user_id}`]) return false
 
+    /** 同一用户同一消息 1s 内只处理一次 */
     const msgId = `${e.self_id}:${e.user_id}:${e.raw_message}`
     if (this.msgThrottle[msgId]) return false
 
@@ -895,7 +852,6 @@ class PluginsLoader {
     }
   }
 
-  /** 是否只关注主动at */
   onlyReplyAt(e: JiuLiEvent, groupCfg?: any) {
     if (!e.message || e.isPrivate) return true
 
@@ -913,7 +869,7 @@ class PluginsLoader {
     return false
   }
 
-  /** 判断黑白名单 */
+  /** 命中 other 中的黑名单即拦截；白名单存在时未命中即拦截 */
   checkBlack(e: JiuLiEvent) {
     const other = cfg.getOther()
 
@@ -928,7 +884,7 @@ class PluginsLoader {
     return true
   }
 
-  /** 判断是否启用功能 */
+  /** groupCfg 的 disable 列表命中即禁用；enable 列表存在时不在其中即禁用 */
   checkDisable(p: { plugin: any; e: JiuLiEvent }, groupCfg?: any) {
     groupCfg ||= cfg.getGroup(p.e.self_id, p.e.group_id)
     if (groupCfg.disable?.length && groupCfg.disable.includes(p.plugin.name)) return false
@@ -939,7 +895,7 @@ class PluginsLoader {
   /* ==================== 卸载/热重载 ==================== */
 
   async unloadPlugin(key: string, closeWatcher = false) {
-    /** 生命周期：插件自定义的清理（定时器、连接等） */
+    /** 插件的清理回调（定时器、连接等） */
     const initInstance = this.initInstances.get(key)
     if (typeof initInstance?.onUnload === 'function')
       try {
@@ -991,7 +947,7 @@ class PluginsLoader {
     const oldPluginCount = this.pluginCount
     try {
       await this.unloadPlugin(key)
-      /** 目录型插件（有 index.js）需要指向 index.js，否则 Node 不支持目录 import */
+      /** 目录型插件需指向 index.js，Node 不支持目录 import */
       const target = key.endsWith('.js') ? key : `${key}/index.js`
       const success = await this.importPlugin({
         name: key,
@@ -1022,32 +978,30 @@ class PluginsLoader {
 
   /* ==================== 热重载 ==================== */
 
-  /** 把 plugins/ 下的相对路径换算成插件 key（与 getPlugins 的命名保持一致） */
+  /** plugins/ 下的相对路径 → 插件 key，命名与 getPlugins 保持一致 */
   private keyOf(rel: string): string | null {
     const parts = rel.split('/')
     if (parts.length < 2) return null
     if (parts.length === 2) return parts[1] === 'index.js' ? parts[0] : rel
-    /** 更深的文件（apps/ 等）归属到插件目录 */
+    /** apps/ 等更深层的文件归属到其插件目录 */
     return parts[0]
   }
 
-  /** 是否为"无插件类"的文件（适配器 / 胶水文件） */
+  /** 适配器 / 胶水文件（无插件类） */
   isInert(key: string) {
     return this.inertFiles.has(key)
   }
 
-  /** 判断是否已加载 */
   private isLoaded(key: string) {
     return this.pluginCountMap.has(key) || this.priority.some(i => i.key === key)
   }
 
-  /** 按 key 加载（新增的插件文件/目录）；已加载则重载 */
+  /** 按 key 加载；已加载则重载 */
   async reloadKey(key: string) {
     if (this.isLoaded(key)) return this.changePlugin(key)
     return this.loadKey(key)
   }
 
-  /** 按 key 加载（新增的插件文件/目录） */
   private async loadKey(key: string) {
     const target = key.endsWith('.js') ? key : `${key}/index.js`
     await this.importPlugin({ name: key, path: `../../${this.dir}/${target}?${Date.now()}` })
@@ -1057,16 +1011,13 @@ class PluginsLoader {
   }
 
   /**
-   * 监听整个 plugins/ 目录（唯一入口，替换原来的逐文件 watcher）
-   * - 新增 js 文件 / 新增目录中的 js → 自动加载
-   * - 修改 js（含 index.js 与 apps/ 等深层文件）→ 自动重载
-   * - 删除 js → 自动卸载
-   * - 模板/资源变化不重载（渲染层自带缓存失效）
+   * 监听整个 plugins/ 目录：新增 js 自动加载、修改自动重载、删除自动卸载
+   * 非 js 资源变化不触发重载（渲染层自带缓存失效）
    */
   watchPlugins() {
     if (this.watcher['#root']) return
     const root = `./${this.dir}`
-    /** 忽略 node_modules/.git 等目录：clone 第三方插件时避免扫描上万文件与重载风暴 */
+    /** 忽略 node_modules/.git：clone 第三方插件时避免扫描上万文件导致重载风暴 */
     const watcher = chokidar.watch(root, {
       depth: 4,
       ignoreInitial: true,
@@ -1126,7 +1077,7 @@ class PluginsLoader {
     this.watchPlugins()
   }
 
-  /** 关闭全部 watcher（file_watch=false 时由 config 处理） */
+  /** closeWatchers：file_watch=false 时改由 config 用 NullWatcher 接管 */
   closeWatchers() {
     for (const i in this.watcher) {
       this.watcher[i]?.close?.()

@@ -1,9 +1,4 @@
-/**
- * 消息元素工厂（segment）
- *
- * 内核自带实现；lib/modules/oicq 作为包名转发到这里（旧插件 `import { segment } from 'oicq'`）。
- * 存在 ICQQ-Plugin 时，额外借用 icqq 的 segment 实现（带弃用提示），与云崽行为一致。
- */
+/** 消息元素工厂 segment；lib/modules/oicq 指向本实现，旧插件从 'oicq' 包名导入 */
 export interface SegmentFactory {
   [key: string]: (...args: any[]) => any
 }
@@ -44,7 +39,7 @@ const segment: SegmentFactory = {
   },
 }
 
-/** 借用 icqq 的 segment（如果 ICQQ-Plugin 存在） */
+/** 补齐 icqq 专有元素，仅在 ICQQ-Plugin 存在时生效 */
 async function extendFromIcqq() {
   try {
     const spec = `file://${process.cwd()}/plugins/ICQQ-Plugin/node_modules/icqq/lib/message/elements.js`
@@ -58,7 +53,7 @@ async function extendFromIcqq() {
 }
 
 let extended = false
-/** 补齐 icqq 元素（异步，启动时调用一次） */
+/** 异步补齐 icqq 元素，启动时调用一次 */
 export async function extendSegment() {
   if (extended) return segment
   extended = true
@@ -66,7 +61,7 @@ export async function extendSegment() {
   return segment
 }
 
-/** 取全局 segment（兼容层注入）或内核实现 */
+/** 取全局 segment（兼容层注入的优先）或内核实现 */
 export function getSegment(): SegmentFactory {
   return (globalThis as any).segment || segment
 }
