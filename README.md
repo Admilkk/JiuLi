@@ -38,6 +38,7 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 | `session` | `m` | 在 tmux 会话里启动（可脱离/接回，服务器推荐） |
 | `attach` | `at` | 接回 tmux/screen 会话（实时日志 + 可输入指令） |
 | `build` | `b` | 编译内核 |
+| `deps` | `d` | 扫描 `plugins/` 下 JS 插件的 import，一键装齐缺失依赖（`--dry` 只看不装） |
 | `test` | `t` | 跑测试（`--hot` / `--restart`） |
 
 启动模式：

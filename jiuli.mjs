@@ -10,11 +10,13 @@
  *   node jiuli.mjs build|test|status
  */
 import { spawnSync, spawn } from 'node:child_process'
+import { createRequire, builtinModules } from 'node:module'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 
 const CWD = process.cwd()
+const nodeBuiltins = new Set(builtinModules)
 const isWin = process.platform === 'win32'
 
 const color = (code, text) => `\u001b[${code}m${text}\u001b[0m`
@@ -36,10 +38,16 @@ function run(cmd, args, opts = {}) {
   return spawnCmd(cmd, args, { stdio: 'inherit', cwd: CWD, ...opts })
 }
 
-/** Windows 下 .cmd 需要 shell；把命令拼成单字符串避免 DEP0190 警告 */
+/**
+ * Windows 下 .cmd 需要 shell；把命令拼成单字符串避免 DEP0190 警告。
+ * 含 cmd 特殊字符（^ & | < > 括号、空格、引号，如 pnpm 的 @^1.2.3 版本号）的参数要加引号，
+ * 否则 ^ 会被 cmd 当转义符吃掉。
+ */
 function spawnCmd(bin, args = [], opts = {}) {
   if (isWin) {
-    const line = [bin, ...args].map(a => (/[\s"]/.test(a) ? `"${String(a).replace(/"/g, '\\"')}"` : a)).join(' ')
+    const line = [bin, ...args]
+      .map(a => (/[\s"^&|<>()]/.test(a) ? `"${String(a).replace(/"/g, '\\"')}"` : a))
+      .join(' ')
     return spawnSync(line, { shell: true, ...opts })
   }
   return spawnSync(bin, args, opts)
@@ -448,6 +456,116 @@ function cmdFlush() {
   ok('已清空 pm2 日志文件（下次 pnpm log 只显示新日志）')
 }
 
+/* ==================== 插件依赖 ==================== */
+
+/** 递归列出插件代码文件（跳过资源 / 前端产物 / 依赖目录，它们里面的 import 不参与解析） */
+function walkFiles(dir, out = []) {
+  const SKIP_DIR = ['node_modules', '.git', 'temp', 'dist', 'logs', 'data', 'resources', 'web', 'static', 'assets', 'public']
+  let entries = []
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    if (SKIP_DIR.includes(entry.name) || entry.name.startsWith('.')) continue
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) walkFiles(full, out)
+    else if (/\.(js|mjs|cjs)$/.test(entry.name) && !entry.name.endsWith('.min.js')) out.push(full)
+  }
+  return out
+}
+
+/** 从源码里抓 import / require / import() 的裸包名；返回包名集合（子路径归到包名） */
+function scanSpecifiers(code) {
+  const found = new Set()
+  const re = /(?:\bimport\s*\(|\brequire\s*\(|\bfrom\s+|\bimport\s+)['"]([^'"]+)['"]/g
+  for (const m of code.matchAll(re)) {
+    const spec = m[1]
+    if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('#') || spec.startsWith('node:')) continue
+    if (nodeBuiltins.has(spec)) continue
+    /** 取包名部分：@scope/name/子路径 → @scope/name */
+    const parts = spec.split('/')
+    const name = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]
+    /** 过滤掉正则误匹配出来的东西（空格 / 括号 / 引号等都不是合法包名） */
+    if (!/^(?:@[a-z0-9-_.]+\/)?[a-z0-9-_.]+$/i.test(name)) continue
+    found.add(name)
+  }
+  return found
+}
+
+/** 最近的 package.json（用于取依赖声明的版本） */
+function nearestPackage(dir) {
+  let cur = dir
+  while (cur.startsWith(CWD)) {
+    const pkg = path.join(cur, 'package.json')
+    if (fs.existsSync(pkg)) {
+      try {
+        return JSON.parse(fs.readFileSync(pkg, 'utf8'))
+      } catch {
+        return {}
+      }
+    }
+    const up = path.dirname(cur)
+    if (up === cur) break
+    cur = up
+  }
+  return {}
+}
+
+/** 一键安装 plugins/ 下 JS 插件所需的依赖 */
+function cmdDeps(args) {
+  const USAGE = '用法：node jiuli deps [--dry]'
+  const { flags } = parseArgs(args, { flags: ['--dry'], usage: USAGE })
+  const dry = flags.has('--dry')
+
+  const pluginDir = path.join(CWD, 'plugins')
+  if (!fs.existsSync(pluginDir)) fail('没有 plugins/ 目录')
+  const files = walkFiles(pluginDir).filter(f => /\.(js|mjs|cjs)$/.test(f))
+  info(`扫描 ${files.length} 个插件文件，收集 import 的依赖 …`)
+
+  const missing = new Map()
+  for (const file of files) {
+    let code = ''
+    try {
+      code = fs.readFileSync(file, 'utf8')
+    } catch {
+      continue
+    }
+    for (const spec of scanSpecifiers(code)) {
+      /** 从该插件所在目录解析：装在插件自己的 node_modules 里也算已安装 */
+      try {
+        createRequire(file).resolve(spec)
+        continue
+      } catch {}
+      const rel = path.relative(CWD, file).replace(/\\/g, '/')
+      missing.set(spec, [...(missing.get(spec) || []), rel])
+    }
+  }
+
+  if (!missing.size) return ok('插件依赖齐全，没有缺失')
+
+  console.log()
+  info(`缺失 ${missing.size} 个依赖：`)
+  for (const [name, files] of missing) console.log(`    ${color(31, name)} ← ${files.slice(0, 3).join(' · ')}${files.length > 3 ? ' …' : ''}`)
+  console.log()
+
+  /** 插件自己声明过版本就用它的（就近的 package.json） */
+  const specs = [...missing.keys()].map(name => {
+    const pkg = nearestPackage(path.dirname(path.join(CWD, missing.get(name)[0])))
+    const ver = pkg.dependencies?.[name] || pkg.devDependencies?.[name]
+    if (!ver || ver.startsWith('link:') || ver.startsWith('file:') || ver.startsWith('workspace:')) return name
+    return `${name}@${ver}`
+  })
+
+  if (dry) return info(`--dry：不会真的安装。命令为  pnpm add ${specs.join(' ')}`)
+
+  info(`安装中：pnpm add ${specs.join(' ')}`)
+  const ret = run('pnpm', ['add', ...specs])
+  if (ret.status !== 0) fail('安装失败，请检查网络后重试（也可手动 pnpm add 上面的包名）')
+  ok(`已安装 ${specs.length} 个依赖 · 发 #重载 或 #重启 后生效`)
+}
+
 function cmdHelp() {
   console.log(`JiuLi CLI   （node jiuli <命令> 或 node jiuli.mjs <命令>）
 
@@ -467,6 +585,7 @@ function cmdHelp() {
   add <git地址>    a             安装第三方插件（克隆到 plugins/ 并装依赖）
                                   --name 目录名 可指定插件目录名（URL 写前面）
   build           b             编译内核
+  deps            d             扫描 plugins/ 下 JS 插件，一键装齐缺失的依赖（--dry 只看不装）
   test            t             冒烟测试（--hot 热重载 / --restart 守护进程）
   flush                         清空 pm2 日志文件
   help            h / ?         本说明
@@ -522,6 +641,9 @@ const commands = {
   st: cmdStatus,
   info: cmdStatus,
   flush: cmdFlush,
+  // 依赖
+  deps: () => cmdDeps(args),
+  d: () => cmdDeps(args),
   // 开发
   build: cmdBuild,
   b: cmdBuild,

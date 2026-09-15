@@ -278,7 +278,8 @@ class PluginsLoader {
         text:
           head +
           `缺少依赖包 ${logger.red(name)}${pkgMatch[2] ? `（${logger.gray(rel(pkgMatch[2]))} 引入）` : ''}\n` +
-          `        安装：${dir ? `cd ${dir} && ` : ''}pnpm add ${name}　或　项目根目录 pnpm i`,
+          `        安装：${dir ? `cd ${dir} && ` : ''}pnpm add ${name}　或　项目根目录 pnpm i` +
+          `　或一键装齐插件依赖：node jiuli deps`,
         pkg: true,
       }
     }
