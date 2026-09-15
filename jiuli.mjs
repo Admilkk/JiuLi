@@ -513,7 +513,13 @@ function nearestPackage(dir) {
   return {}
 }
 
-/** 一键安装 plugins/ 下 JS 插件所需的依赖 */
+/**
+ * 一键安装松散 JS 插件的依赖
+ *
+ * 只管「没有 index.js 的平铺插件目录」（如 plugins/example/）——这类插件的 import 没有
+ * 任何地方声明依赖。插件包（miao-plugin 等有 index.js 的）依赖由各自 package.json 负责，
+ * 跑 pnpm i 即可，扫它们只会报出一堆假缺失。
+ */
 function cmdDeps(args) {
   const USAGE = '用法：node jiuli deps [--dry]'
   const { flags } = parseArgs(args, { flags: ['--dry'], usage: USAGE })
@@ -521,49 +527,92 @@ function cmdDeps(args) {
 
   const pluginDir = path.join(CWD, 'plugins')
   if (!fs.existsSync(pluginDir)) fail('没有 plugins/ 目录')
-  const files = walkFiles(pluginDir).filter(f => /\.(js|mjs|cjs)$/.test(f))
-  info(`扫描 ${files.length} 个插件文件，收集 import 的依赖 …`)
 
-  const missing = new Map()
-  for (const file of files) {
-    let code = ''
-    try {
-      code = fs.readFileSync(file, 'utf8')
-    } catch {
-      continue
-    }
-    for (const spec of scanSpecifiers(code)) {
-      /** 从该插件所在目录解析：装在插件自己的 node_modules 里也算已安装 */
+  const loose = []
+  let packaged = 0
+  for (const entry of fs.readdirSync(pluginDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+    const dir = path.join(pluginDir, entry.name)
+    if (fs.existsSync(path.join(dir, 'index.js'))) packaged++
+    else loose.push(dir)
+  }
+  if (!loose.length) return ok('没有需要扫描的松散 JS 插件目录（插件包的依赖由 pnpm i 负责）')
+
+  const names = loose.map(d => path.relative(CWD, d).replace(/\\/g, '/'))
+  info(`扫描松散 JS 插件目录：${names.join(' · ')}　（另有 ${packaged} 个插件包的依赖由 pnpm i 负责）`)
+
+  /** 每个目录缺哪些包（同一目录的合成一条 pnpm add） */
+  const targets = new Map()
+  let scanned = 0
+  for (const dir of loose) {
+    const files = walkFiles(dir).filter(f => /\.(js|mjs|cjs)$/.test(f))
+    scanned += files.length
+    const missing = targets.get(dir) || new Map()
+    for (const file of files) {
+      let code = ''
       try {
-        createRequire(file).resolve(spec)
+        code = fs.readFileSync(file, 'utf8')
+      } catch {
         continue
-      } catch {}
-      const rel = path.relative(CWD, file).replace(/\\/g, '/')
-      missing.set(spec, [...(missing.get(spec) || []), rel])
+      }
+      for (const spec of scanSpecifiers(code)) {
+        /** 插件内部自己的文件（如 models/xx.js 这种写法）不算依赖 */
+        if (fs.existsSync(path.join(path.dirname(file), spec))) continue
+        try {
+          createRequire(file).resolve(spec)
+          continue
+        } catch {}
+        missing.set(spec, [...(missing.get(spec) || []), path.relative(CWD, file).replace(/\\/g, '/')])
+      }
     }
+    if (missing.size) targets.set(dir, missing)
   }
 
-  if (!missing.size) return ok('插件依赖齐全，没有缺失')
+  const total = [...targets.values()].reduce((n, m) => n + m.size, 0)
+  if (!total) return ok(`${scanned} 个插件文件，依赖齐全，没有缺失`)
 
   console.log()
-  info(`缺失 ${missing.size} 个依赖：`)
-  for (const [name, files] of missing) console.log(`    ${color(31, name)} ← ${files.slice(0, 3).join(' · ')}${files.length > 3 ? ' …' : ''}`)
+  for (const [dir, missing] of targets) {
+    info(`${path.relative(CWD, dir).replace(/\\/g, '/')} 缺失 ${missing.size} 个依赖：`)
+    for (const [name, files] of missing)
+      console.log(`    ${color(31, name)} ← ${files.slice(0, 3).join(' · ')}${files.length > 3 ? ' …' : ''}`)
+  }
   console.log()
 
-  /** 插件自己声明过版本就用它的（就近的 package.json） */
-  const specs = [...missing.keys()].map(name => {
-    const pkg = nearestPackage(path.dirname(path.join(CWD, missing.get(name)[0])))
-    const ver = pkg.dependencies?.[name] || pkg.devDependencies?.[name]
-    if (!ver || ver.startsWith('link:') || ver.startsWith('file:') || ver.startsWith('workspace:')) return name
-    return `${name}@${ver}`
-  })
+  /** 逐目录安装：目录自带 package.json（如 plugins/example/）就装进它，否则装到项目根 */
+  const jobs = []
+  for (const [dir, missing] of targets) {
+    const specs = [...missing.keys()].map(name => {
+      const ver = nearestPackage(dir).dependencies?.[name] || nearestPackage(dir).devDependencies?.[name]
+      if (!ver || /^(link|file|workspace):/.test(ver)) return name
+      return `${name}@${ver}`
+    })
+    const rel = path.relative(CWD, dir).replace(/\\/g, '/')
+    const hasPkg = fs.existsSync(path.join(dir, 'package.json'))
+    jobs.push({
+      dir,
+      specs,
+      args: hasPkg ? ['--dir', rel, 'add', ...specs] : ['-w', 'add', ...specs],
+      text: `pnpm ${hasPkg ? `--dir ${rel} ` : '-w '}add ${specs.join(' ')}`,
+    })
+  }
 
-  if (dry) return info(`--dry：不会真的安装。命令为  pnpm add ${specs.join(' ')}`)
+  if (dry) {
+    info('--dry：不会真的安装。将要执行：')
+    for (const job of jobs) console.log(`    ${job.text}`)
+    return
+  }
 
-  info(`安装中：pnpm add ${specs.join(' ')}`)
-  const ret = run('pnpm', ['add', ...specs])
-  if (ret.status !== 0) fail('安装失败，请检查网络后重试（也可手动 pnpm add 上面的包名）')
-  ok(`已安装 ${specs.length} 个依赖 · 发 #重载 或 #重启 后生效`)
+  for (const job of jobs) {
+    info(`安装中：${job.text}`)
+    const ret = spawnCmd('pnpm', job.args)
+    if (ret.status !== 0) {
+      const detail = `${ret.stdout || ''}${ret.stderr || ''}`.trim().split('\n').slice(-3).join('\n        ')
+      fail(`安装失败：\n${detail}\n        也可手动执行：${job.text}`)
+    }
+    ok(`已安装 ${job.specs.length} 个依赖 → ${path.relative(CWD, job.dir).replace(/\\/g, '/')}`)
+  }
+  ok('发 #重载 或 #重启 后生效')
 }
 
 function cmdHelp() {
