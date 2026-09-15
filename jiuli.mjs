@@ -59,6 +59,59 @@ function pm2(args) {
   return spawnCmd(bin, args, { stdio: 'inherit', cwd: CWD })
 }
 
+/* ==================== 参数解析 ==================== */
+
+/** 编辑距离（相邻字符互换算一次）：用于把 --naem / --dri 这类拼错提示成 --name / --dir */
+function distance(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0))
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1)
+    }
+  return dp[a.length][b.length]
+}
+
+/**
+ * 极简参数解析：未知选项、多余的位置参数都直接报错退出（不再默默忽略）
+ * flags 为开关，values 为取值选项（支持 --k v 与 --k=v）
+ */
+function parseArgs(args, { flags = [], values = [], usage = '', rest = 0 } = {}) {
+  const out = { flags: new Set(), values: new Map(), rest: [] }
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg.startsWith('-')) {
+      out.rest.push(arg)
+      continue
+    }
+    const eq = arg.indexOf('=')
+    const key = eq === -1 ? arg : arg.slice(0, eq)
+    const inline = eq === -1 ? null : arg.slice(eq + 1)
+    if (flags.includes(key)) {
+      out.flags.add(key)
+      continue
+    }
+    if (values.includes(key)) {
+      const val = inline ?? args[++i]
+      if (val === undefined || val.startsWith('-')) fail(`${usage}\n  ${key} 后面要跟一个值`)
+      out.values.set(key, val)
+      continue
+    }
+    /** 拼错时给出最接近的选项（--dri → --dir，而不是先命中的 --dsl） */
+    const near = [...flags, ...values]
+      .map(k => ({ k, d: distance(k, key) }))
+      .filter(i => i.d <= 2)
+      .sort((a, b) => a.d - b.d)[0]?.k
+    fail(`${usage}\n  未知选项 ${key}${near ? `，是想写 ${near} 吗？` : ''}`)
+  }
+  if (out.rest.length > rest) fail(usage)
+  return out
+}
+
 /* ==================== tmux / screen 会话 ==================== */
 
 /** 会话名（可用 JIULI_SESSION 覆盖） */
@@ -200,7 +253,12 @@ function cmdInit() {
 }
 
 function cmdStart(args) {
-  const fg = args.includes('--fg') || args.includes('-f')
+  const { flags, rest } = parseArgs(args, {
+    flags: ['--fg', '-f'],
+    usage: '用法：node jiuli s [--fg]',
+    rest: 1,
+  })
+  const fg = flags.has('--fg') || flags.has('-f')
   ensureDeps()
   ensureBuild()
   ensureConfig()
@@ -276,10 +334,12 @@ function cmdStatus() {
 }
 
 function cmdCreate(args) {
-  const name = args.find(a => !a.startsWith('-'))
-  const dsl = args.includes('--dsl')
-  const asDir = args.includes('--dir')
-  if (!name) fail('用法：pnpm jiuli create <插件名> [--dsl] [--dir]')
+  const USAGE = '用法：node jiuli c <插件名> [--dsl] [--dir]'
+  const { flags, rest } = parseArgs(args, { flags: ['--dsl', '--dir'], usage: USAGE, rest: 1 })
+  const name = rest[0]
+  const dsl = flags.has('--dsl')
+  const asDir = flags.has('--dir')
+  if (!name) fail(USAGE)
   if (!/^[\p{L}\p{N}._-]+$/u.test(name)) fail('插件名只能包含字母、数字、汉字、点、下划线、连字符')
 
   const tplDir = path.join(CWD, 'templates', dsl ? 'plugin-dsl' : 'plugin-class')
@@ -345,12 +405,12 @@ function cmdCreate(args) {
 
 /** 安装第三方插件：克隆到 plugins/ 下并安装依赖 */
 function cmdAdd(args) {
-  const url = args.find(a => !a.startsWith('-'))
-  if (!url) fail('用法：pnpm jiuli add <git地址> [--name 目录名]')
-  const nameIndex = args.indexOf('--name')
+  const USAGE = '用法：node jiuli a <git地址> [--name 目录名]'
+  const { values, rest } = parseArgs(args, { values: ['--name'], usage: USAGE, rest: 1 })
+  const url = rest[0]
+  if (!url) fail(USAGE)
   const name =
-    args.find(a => a.startsWith('--name='))?.slice('--name='.length) ||
-    (nameIndex > -1 ? args[nameIndex + 1] : null) ||
+    values.get('--name') ||
     url
       .split('/')
       .pop()
