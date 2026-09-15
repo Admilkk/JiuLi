@@ -219,6 +219,19 @@ class Cfg {
     if (key in this.config) return this.config[key]
     const base = type === 'config' ? this.userDir : `config/${type}/`
     const file = path.join(base, `${name}.yaml`)
+    /** 用户配置缺失时从默认配置重建（运行期间被误删也能自愈） */
+    if (type === 'config' && !fs.existsSync(file)) {
+      try {
+        fs.mkdirSync(base, { recursive: true })
+        const defFile = `config/default_config/${name}.yaml`
+        if (fs.existsSync(defFile)) {
+          fs.copyFileSync(defFile, file)
+          safeLog(`[Config] 用户配置 ${file} 缺失，已从默认配置重建`)
+        }
+      } catch (err) {
+        safeLog(`[Config] 重建 ${file} 失败：${err}`)
+      }
+    }
     try {
       this.config[key] = YAML.parse(fs.readFileSync(file, 'utf8'))
     } catch (err: any) {

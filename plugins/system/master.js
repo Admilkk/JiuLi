@@ -31,15 +31,31 @@ export default class Master extends JiuLiPlugin {
     return this.reply(msg.trim() || '暂无验证码', true)
   }
 
+  /** 写入用户配置；文件/目录被误删时自愈重建 */
   async edit(yamlFile, key, value) {
-    const doc = YAML.parseDocument(await fs.readFile(yamlFile, 'utf8'))
+    const dir = yamlFile.replace(/[/\\][^/\\]+$/, '')
+    await Bot.mkdir(dir)
+
+    let text = ''
+    try {
+      text = await fs.readFile(yamlFile, 'utf8')
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err
+      /** 文件缺失：从默认配置重建一份，保证后续解析有完整结构 */
+      try {
+        text = await fs.readFile(`config/default_config/${yamlFile.split(/[/\\]/).pop()}`, 'utf8')
+        logger.mark(`配置文件 ${yamlFile} 缺失，已从默认配置重建`)
+      } catch {
+        text = ''
+      }
+    }
+
+    const doc = YAML.parseDocument(text)
     const values = doc.get(key)
     if (values) {
       if (values.items.some(item => item.value == value)) return
       values.add(value)
     } else doc.set(key, [value])
-    /** 目录被清理时自愈 */
-    await Bot.mkdir(yamlFile.replace(/[/\\][^/\\]+$/, ''))
     return fs.writeFile(yamlFile, doc.toString(), 'utf8')
   }
 
@@ -61,8 +77,13 @@ export default class Master extends JiuLiPlugin {
     delete code[key]
     this.finish('verify')
     if (verified) {
-      await this.edit(configFile(), 'masterQQ', this.e.user_id)
-      await this.edit(configFile(), 'master', `${this.e.self_id}:${this.e.user_id}`)
+      try {
+        await this.edit(configFile(), 'masterQQ', this.e.user_id)
+        await this.edit(configFile(), 'master', `${this.e.self_id}:${this.e.user_id}`)
+      } catch (err) {
+        logger.error('写入主人配置失败', err)
+        return this.reply(`写入配置失败：${err.message || err}`, true)
+      }
       return this.reply(`[${this.e.user_id}] 设置主人完成`, true)
     }
     return this.reply('验证码错误', true)

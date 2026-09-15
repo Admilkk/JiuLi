@@ -305,6 +305,38 @@ check(
   diag.slice(0, 80),
 )
 
+/* ---------- 4a3. 运行中配置文件被删 → #设置主人 自愈重建 ---------- */
+{
+  await sleep(1200)
+  fs.rmSync('test/.tmp-config/other.yaml', { force: true }) // 模拟运行中被误删
+  const logs = []
+  const origLog = console.log
+  console.log = (...args) => {
+    logs.push(args.map(String).join(' '))
+    origLog(...args)
+  }
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '99997', msg: '#设置主人' })
+  await sleep(800)
+  console.log = origLog
+
+  const clean = logs.join(String.fromCharCode(10)).replace(/\[[0-9;]*m/g, '')
+  const m = clean.match(/设置主人验证码\s+([0-9A-Z]+)/)
+  clear()
+  emit({ type: 'message', group_id: '888777666', user_id: '99997', msg: m ? m[1] : '000000' })
+  await sleep(700)
+  check(
+    '配置文件被删后 #设置主人 自愈重建',
+    json().includes('设置主人完成') && fs.existsSync('test/.tmp-config/other.yaml'),
+    json().slice(0, 60),
+  )
+  /** 还原测试用主人配置（放在最后执行，避免影响其它用例） */
+  fs.writeFileSync(
+    'test/.tmp-config/other.yaml',
+    ['master:', '  - "mock:10001"', ''].join(String.fromCharCode(10)),
+  )
+}
+
 /* ---------- 汇总 ---------- */
 const pass = results.filter(r => r.ok).length
 console.log(`\n=== 冒烟测试：${pass}/${results.length} 通过${skipped.length ? `，${skipped.length} 项跳过` : ''} ===`)
