@@ -319,6 +319,7 @@ function cmdHelp() {
   list            ls            列出 plugins/ 下的插件目录
   create <名称>    c             生成插件骨架（--dsl 函数式 / --dir 独立目录）
   add <git地址>    a             安装第三方插件（克隆到 plugins/ 并装依赖）
+                                  --name 目录名 可指定插件目录名（URL 写前面）
   build           b             编译内核
   test            t             冒烟测试（--hot 热重载 / --restart 守护进程）
   flush                         清空 pm2 日志文件

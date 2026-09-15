@@ -34,7 +34,7 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 | `status` | `st` | 环境与运行状态 |
 | `list` | `ls` | 列出插件目录 |
 | `create <名称>` | `c` | 生成插件骨架（`--dsl` / `--dir`） |
-| `add <git地址>` | `a` | 安装第三方插件 |
+| `add <git地址>` | `a` | 安装第三方插件（`--name 目录名` 指定目录名） |
 | `build` | `b` | 编译内核 |
 | `test` | `t` | 跑测试（`--hot` / `--restart`） |
 
