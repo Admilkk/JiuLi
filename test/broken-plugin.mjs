@@ -34,7 +34,7 @@ const copyTree = (from, to) => {
     else fs.copyFileSync(src, dest)
   }
 }
-for (const dir of ['system', 'adapter'])
+for (const dir of ['system', 'other', 'adapter'])
   if (fs.existsSync(path.join('plugins', dir))) copyTree(path.join('plugins', dir), path.join(PLUGINS_DIR, dir))
 fs.mkdirSync(path.join(PLUGINS_DIR, 'node_modules'), { recursive: true })
 try {
@@ -109,6 +109,30 @@ export default class Slow extends JiuLiPlugin {
 `,
 )
 
+/**
+ * 云崽兼容别名：真实老插件在 <插件>/apps/*.js 里 import '../../other/update.js'，
+ * 必须能通；且 plugins/other/ 本身不能被当成插件重复注册。
+ */
+const ALIAS_DIR = path.join(PLUGINS_DIR, '别名插件')
+fs.mkdirSync(path.join(ALIAS_DIR, 'apps'), { recursive: true })
+fs.writeFileSync(path.join(ALIAS_DIR, 'index.js'), `export * from './apps/用other.js'\n`)
+fs.writeFileSync(
+  path.join(ALIAS_DIR, 'apps', '用other.js'),
+  `import { update } from '../../other/update.js'
+import { Restart } from '../../other/restart.js'
+import { JiuLiPlugin } from 'jiuli'
+
+export class Alias extends JiuLiPlugin {
+  constructor() {
+    super({ name: '用other别名', dsc: 'alias', rule: [{ reg: '^#别名测试$', fnc: 'hi' }] })
+  }
+  async hi() {
+    return this.reply(\`别名可用 \${typeof update} \${typeof Restart}\`)
+  }
+}
+`,
+)
+
 /* ---------- 运行环境 ---------- */
 const lines = []
 const origLog = console.log
@@ -164,6 +188,18 @@ check(
   lines.find(l => l.includes('pnpm '))?.slice(0, 80) || '（无提示）',
 )
 check('加载期不再刷屏 Node 堆栈', !errLines.some(l => /at (ModuleLoader|ModuleJob|finalizeResolution)/.test(l)))
+
+/* ---------- A1. 云崽兼容别名 plugins/other/ ---------- */
+check(
+  '老插件的 ../../other/update.js 能加载（框架提供别名）',
+  loader.priority.some(i => i.name === '用other别名'),
+  loader.priority.some(i => i.name === '用other别名') ? '' : '未加载',
+)
+check(
+  '别名目录本身不被当成插件（不重复注册）',
+  !loader.priority.some(i => String(i.key).startsWith('other/')),
+  loader.priority.filter(i => String(i.key).startsWith('other/')).map(i => i.key).join(' · ') || '（无）',
+)
 
 /* ---------- A2. 插件一直不就绪：不能默默卡住 ---------- */
 check(

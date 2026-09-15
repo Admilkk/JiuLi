@@ -100,11 +100,14 @@ class PluginsLoader {
   private countBuffer = new Map<string, number>()
   private countTimer?: NodeJS.Timeout
 
+  /** 只做兼容别名、不作为插件源的目录（云崽的 plugins/other/ 转发到 system/） */
+  aliasDirs = new Set(['other'])
+
   async getPlugins() {
     const files = await fs.readdir(this.dir, { withFileTypes: true }).catch(() => [] as any[])
     const ret: Array<{ name: string; path: string }> = []
     for (const val of files) {
-      if (!val.isDirectory()) continue
+      if (!val.isDirectory() || this.aliasDirs.has(val.name)) continue
       const tmp = { name: val.name, path: `../../${this.dir}/${val.name}` }
 
       if (await util.fsStat(`${this.dir}/${val.name}/index.js`)) {
