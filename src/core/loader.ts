@@ -138,8 +138,14 @@ class PluginsLoader {
 
     await Promise.allSettled(
       files.map(async file => {
-        if ((await util.sleep(cfg.bot.plugin_load_timeout * 1000, this.importPlugin(file, packageErr))) === util.sleepTimeout)
-          util.makeLog('error', `插件加载超时 ${logger.red(file.name)}`, 'Plugin')
+        const timeout = cfg.bot.plugin_load_timeout * 1000
+        if ((await util.sleep(timeout, this.importPlugin(file, packageErr))) === util.sleepTimeout)
+          util.makeLog(
+            'error',
+            `插件加载超时（${timeout / 1000} 秒）${logger.red(file.name)}\n` +
+              `        插件顶层可能在等网络 / 连服务；已跳过，其余插件不受影响（可调 bot.yaml → plugin_load_timeout）`,
+            'Plugin',
+          )
       }),
     )
 
@@ -195,6 +201,58 @@ class PluginsLoader {
     return [...list, ...wild]
   }
 
+  /**
+   * 把插件加载错误翻译成「看得懂 + 有下一步」的一行提示；完整堆栈留给 debug 级别
+   * @returns text 提示文本；pkg 是否属于「缺依赖」（汇总后统一提示安装）
+   */
+  describeLoadError(error: any, file: { name: string }): { text: string; pkg: boolean } {
+    const msg = String(error?.message || error)
+    const head = `插件加载错误 ${logger.red(file.name)} · `
+    const rel = (p: string) => String(p).replace(/\\/g, '/').replace(`${process.cwd().replace(/\\/g, '/')}/`, '')
+
+    /** 路径型模块找不到：插件少放文件 / 相对路径写错（Windows 下 imported from 后不带引号） */
+    const missing = msg.match(/Cannot find module '([^']+)'(?:\s+imported from\s+'?([^'\s]+)'?)?/)
+    if (missing) {
+      const target = missing[1]
+      if (target.startsWith('.') || target.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(target)) {
+        return {
+          text:
+            head +
+            `找不到文件 ${logger.yellow(rel(target))}\n` +
+            `        ${missing[2] ? `由 ${logger.gray(rel(missing[2]))} 引入 —— ` : ''}该文件不存在：插件没放全，或相对路径写错`,
+          pkg: false,
+        }
+      }
+    }
+
+    /** 裸包名：缺依赖 */
+    const pkgMatch = msg.match(/Cannot find package '([^']+)'(?:\s+imported from\s+'?([^'\s]+)'?)?/)
+    if (pkgMatch) {
+      const [, name] = pkgMatch
+      const dir = rel(pkgMatch[2] || '').split('/').slice(0, 2).join('/')
+      return {
+        text:
+          head +
+          `缺少依赖包 ${logger.red(name)}${pkgMatch[2] ? `（${logger.gray(rel(pkgMatch[2]))} 引入）` : ''}\n` +
+          `        安装：${dir ? `cd ${dir} && ` : ''}pnpm add ${name}　或　项目根目录 pnpm i`,
+        pkg: true,
+      }
+    }
+
+    /** 语法错误：给出位置，便于直接定位 */
+    if (error?.name === 'SyntaxError' || /Unexpected|Invalid or unexpected token/.test(msg)) {
+      return {
+        text:
+          head +
+          `语法错误 ${logger.yellow(msg)}\n` +
+          `        检查该文件是否写完整（括号 / 引号是否闭合），可执行 node --check 自查`,
+        pkg: false,
+      }
+    }
+
+    return { text: head + logger.yellow(msg), pkg: false }
+  }
+
   async importPlugin(file: { name: string; path: string }, packageErr?: any[]) {
     const start_time = Date.now()
     let success = true
@@ -210,26 +268,33 @@ class PluginsLoader {
       for (const i of await Promise.allSettled(pluginArray))
         if (i?.status && i.status !== 'fulfilled') {
           success = false
-          util.makeLog('error', [`插件加载错误 ${logger.red(file.name)}`, i], 'Plugin')
+          const info = this.describeLoadError(i.reason, file)
+          util.makeLog('error', info.text, 'Plugin')
+          util.makeLog('debug', [`${file.name} 加载失败详情`, i.reason], 'Plugin')
+          if (packageErr && info.pkg) packageErr.push({ error: i.reason, file })
         }
     } catch (error: any) {
       success = false
-      const stack = String(error?.stack || '')
-      if (packageErr && stack.includes('Cannot find package')) {
-        packageErr.push({ error, file })
-        /** 插件目录自带 package.json 会断掉对 'jiuli' 的解析，给出修法 */
-        if (stack.includes("Cannot find package 'jiuli'"))
-          util.makeLog(
-            'error',
-            `提示：${file.name} 所在目录有自己的 package.json，请在其中加入 "jiuli": "link:../.."，然后执行 pnpm install`,
-            'Plugin',
-          )
-      } else {
-        util.makeLog('error', [`插件加载错误 ${logger.red(file.name)}`, error], 'Plugin')
-      }
+      const info = this.describeLoadError(error, file)
+      util.makeLog('error', info.text, 'Plugin')
+      /** 堆栈只在 debug 级别出现，避免刷屏把后面的启动日志顶掉 */
+      util.makeLog('debug', [`${file.name} 加载失败详情`, error], 'Plugin')
+      if (packageErr && info.pkg) packageErr.push({ error, file })
+      /** 插件目录自带 package.json 会断掉对 'jiuli' 的解析，给出修法 */
+      if (String(error?.message).includes("Cannot find package 'jiuli'"))
+        util.makeLog(
+          'error',
+          `        提示：${file.name} 所在目录有自己的 package.json，需在其中加 "jiuli": "link:../.."，再执行 pnpm install`,
+          'Plugin',
+        )
     } finally {
       ;(globalThis as any).__jiuliLoading = prevLoading
-      if (!this.pluginCountMap.get(file.name)) this.inertFiles.add(file.name)
+      /**
+       * 加载成功但没有任何插件类（适配器 / 纯胶水文件）：#重载 时不必再导入。
+       * 加载失败的**不能**记为惰性，否则修好后 #重载 会一直跳过它。
+       */
+      if (success && !this.pluginCountMap.get(file.name)) this.inertFiles.add(file.name)
+      else if (!success) this.inertFiles.delete(file.name)
     }
     this.load_time[file.name] = Date.now() - start_time
     return success
@@ -283,16 +348,25 @@ class PluginsLoader {
     }
   }
 
+  /** 缺依赖的汇总提示（单个插件的报错已在 importPlugin 里逐条给出） */
   packageTips(packageErr: any[]) {
     if (!packageErr.length) return
-    util.makeLog('error', '--------- 插件加载错误 ---------', 'Plugin')
+    const map = new Map<string, string[]>()
     for (const i of packageErr) {
-      const pack = String(i.error.stack).match(/'(.+?)'/g)?.[0]?.replace(/'/g, '') || '未知依赖'
-      util.makeLog('error', `${logger.cyan(i.file.name)} 缺少依赖 ${logger.red(pack)}`, 'Plugin')
+      const name = String(i.error?.message).match(/Cannot find package '([^']+)'/)?.[1]
+      if (!name) continue
+      map.set(name, [...(map.get(name) || []), String(i.file.name)])
     }
-    util.makeLog('error', `安装插件后请 ${logger.red('pnpm i')} 安装依赖`, 'Plugin')
-    util.makeLog('error', `仍报错${logger.red('进入插件目录')} pnpm add 依赖`, 'Plugin')
-    util.makeLog('error', '--------------------------------', 'Plugin')
+    if (!map.size) return
+    util.makeLog('error', `--------- 有 ${map.size} 个依赖没装 ---------`, 'Plugin')
+    for (const [name, files] of map)
+      util.makeLog('error', `${logger.red(name)} ← ${files.join(' · ')}`, 'Plugin')
+    util.makeLog(
+      'error',
+      `安装：项目根目录 ${logger.red('pnpm i')}；或进入插件目录 ${logger.red('pnpm add <包名>')}，装完 ${logger.red('#重启')}`,
+      'Plugin',
+    )
+    util.makeLog('error', '------------------------------------------', 'Plugin')
   }
 
   /* ==================== 分发 ==================== */
