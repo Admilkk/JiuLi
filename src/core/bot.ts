@@ -110,14 +110,9 @@ export default class JiuLiBot extends EventEmitter {
       }
 
       const own = (this as any)[prop]
-      if (own !== undefined) {
-        if (typeof own === 'function') {
-          const bound = own.bind(this)
-          cache.set(prop, bound)
-          return bound
-        }
-        return own
-      }
+      /** 实例字段原样返回：express app / server 等本身可能是"函数对象"（如 express()），
+       *  绑定会丢掉它自己的属性（.get/.use/.quiet），导致插件挂路由失败 */
+      if (own !== undefined) return own
 
       const u = (util as any)[prop]
       if (u !== undefined) {

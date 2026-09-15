@@ -38,6 +38,9 @@ export async function initRedisOrFallback() {
 export async function start() {
   const g = globalThis as any
   g.start_type ||= 'internal'
+
+  /** 默认只保留 10 帧调用栈，插件报错时看不到真正的调用位置，这里放大 */
+  Error.stackTraceLimit = 50
   /** 时区与标题 */
   process.env.TZ ??= 'Asia/Shanghai'
   let realVersion = '0.0.0'

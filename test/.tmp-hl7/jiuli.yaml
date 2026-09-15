@@ -1,0 +1,32 @@
+# ===== JiuLi 框架专属配置 =====
+
+# ---- 对外标识（插件探测用）----
+compat:
+  # 插件识别到的框架名：yenai / genshin / xiaofei 等的状态页、版本页、分支判断都读它
+  #   JiuLi        显示为 JiuLi（推荐）
+  #   trss-yunzai  显示 TRSS-Yunzai，并让部分插件走 TRSS 专属分支
+  # 注意：miao-plugin 是直接读真实 package.json 的（那里始终是 jiuli），不受此项影响
+  framework_name: JiuLi
+  # 对外暴露的版本号：插件用它做功能门禁，沿用 3.1.3 可避免老插件判定"版本过低"而禁用功能
+  framework_version: "3.1.3"
+  # 注入全局变量 Bot / logger / redis / segment / Renderer / plugin
+  globals: true
+  # 事件对象注入 e.runtime（懒加载，首次访问时创建）
+  runtime: true
+
+# ---- 存储 ----
+# Redis 不可用且 host 为本机时，降级为内存实现（重启后数据丢失）
+redis_fallback: true
+
+# ---- 性能 ----
+perf:
+  # 插件耗时统计（#玖璃性能 指令查看）
+  metrics: true
+  # 慢插件告警阈值(ms)，0 关闭
+  slow_plugin_ms: 3000
+  # 消息计数写回间隔(ms)，0 为实时写入
+  count_flush_ms: 1000
+  # 每条消息只实例化一次插件（TRSS 中 accept / rule 各建一次实例）
+  once_instance: true
+  # 事件类型索引：按 event 预分组插件，避免每条消息全量遍历
+  event_index: true

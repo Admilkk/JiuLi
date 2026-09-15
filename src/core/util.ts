@@ -385,6 +385,16 @@ class Util {
   Loging(data: any, opts: any = cfg.bot?.log_object) {
     if (typeof data === 'string') {
       /* 保持原样 */
+    } else if (data instanceof Error) {
+      /** 错误对象不截断，保证调用栈完整（排查插件报错时很关键） */
+      data = nodeUtil.inspect(data, {
+        depth: 10,
+        colors: true,
+        showHidden: true,
+        breakLength: 120,
+        maxArrayLength: 100,
+        maxStringLength: Infinity,
+      })
     } else if (!opts) data = this.StringOrNull(data)
     else
       data = nodeUtil.inspect(data, {
