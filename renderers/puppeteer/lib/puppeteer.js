@@ -62,14 +62,110 @@ export default class Puppeteer extends Renderer {
     }
   }
 
+  /**
+   * 找出可用的浏览器；找不到就自动装一个（首次部署的常见缺件）
+   *
+   * 顺序：配置的 chromiumPath → puppeteer 自带缓存 → 系统已装的浏览器 →
+   *       自动安装（Linux 优先 apt/yum/dnf 装 chromium，顺带装中文字体；否则用 puppeteer 下载）
+   * 失败不抛错，返回 '' 由调用方提示（渲染功能停用，不影响其他功能）
+   */
+  async resolveExecutable() {
+    const { execSync } = await import('node:child_process')
+    const isFile = async p => {
+      try {
+        return (await fs.stat(p)).isFile()
+      } catch {
+        return false
+      }
+    }
+    const fromPath = name => {
+      try {
+        const p = execSync(`command -v ${name}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+        return p || ''
+      } catch {
+        return ''
+      }
+    }
+
+    const configured = this.config.executablePath
+    if (configured && (await isFile(configured))) return configured
+
+    /** puppeteer 自带缓存（装了才会命中） */
+    try {
+      const p = await puppeteer.executablePath()
+      if (p && (await isFile(p))) return p
+    } catch {}
+
+    /** 系统已装的浏览器 */
+    const candidates =
+      process.platform === 'linux'
+        ? ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', 'microsoft-edge']
+        : [
+            'C:/Program Files/Google/Chrome/Application/chrome.exe',
+            'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+          ]
+    for (const item of candidates) {
+      const p = item.includes('/') ? item : fromPath(item)
+      if (p && (await isFile(p))) {
+        Bot.makeLog('info', `使用系统已安装的浏览器 · ${p}`, 'Render')
+        return p
+      }
+    }
+
+    /** 自动安装（JIULI_NO_AUTO_INSTALL=1 可关掉，适合不想让框架装东西的场景） */
+    if (!process.env.JIULI_NO_AUTO_INSTALL && process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
+      const has = c => Boolean(fromPath(c))
+      const install = has('apt-get')
+        ? 'apt-get update -qq && apt-get install -y -qq chromium fonts-noto-cjk'
+        : has('dnf')
+          ? 'dnf install -y chromium google-noto-sans-cjk-fonts'
+          : has('yum')
+            ? 'yum install -y chromium'
+            : ''
+      if (install) {
+        Bot.makeLog(
+          'warn',
+          `没找到浏览器，正在自动安装：${install}\n  （中文字体一并安装，否则截图里的中文会变成方块；不想自动装可配置 chromium_path）`,
+          'Render',
+        )
+        try {
+          execSync(install, { stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000 })
+        } catch (err) {
+          Bot.makeLog('error', `自动安装浏览器失败：${String(err?.message || err).split('\n')[0]}`, 'Render')
+        }
+        for (const name of ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable']) {
+          const p = fromPath(name)
+          if (p && (await isFile(p))) {
+            Bot.makeLog('mark', `浏览器已就绪 · ${p}`, 'Render')
+            return p
+          }
+        }
+      }
+    }
+
+    /** 最后一招：让 puppeteer 自己下载（用户态也能用） */
+    if (process.env.JIULI_NO_AUTO_INSTALL) return ''
+    Bot.makeLog('warn', '没有可用浏览器，正在用 puppeteer 下载（约 150MB，仅首次）…', 'Render')
+    try {
+      execSync('npx puppeteer browsers install chrome', { stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000 })
+      const p = await puppeteer.executablePath()
+      if (p && (await isFile(p))) {
+        Bot.makeLog('mark', `浏览器已就绪 · ${p}`, 'Render')
+        return p
+      }
+    } catch (err) {
+      Bot.makeLog('error', `puppeteer 下载浏览器失败：${String(err?.message || err).split('\n')[0]}`, 'Render')
+    }
+
+    return ''
+  }
+
   async createBrowser() {
     const headless = this.config.headless === true || this.config.headless === 'new'
-    let execPath = this.config.executablePath
-    if (!execPath)
-      try {
-        /** puppeteer 新版本为异步接口，兼容同步/异步两种实现 */
-        execPath = await puppeteer.executablePath()
-      } catch {}
+    let execPath = await this.resolveExecutable()
+    if (execPath) this.config.executablePath = execPath
     const info = [
       `程序 ${execPath || '默认'}`,
       `模式 ${headless ? 'headless' : '有界面'}`,

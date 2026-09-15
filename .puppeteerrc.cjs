@@ -37,4 +37,9 @@ if (!executablePath) {
 
 if (executablePath || arch === 'arm64' || arch === 'aarch64') skipDownload = true
 
-module.exports = { skipDownload, executablePath }
+/**
+ * 只有真找到系统浏览器时才写 executablePath：写成 undefined 会让 puppeteer 误判为
+ * "已配置路径"，服务器（没装浏览器）上安装依赖时就不会下载 Chromium，渲染直接不可用。
+ * 找不到时保持不写 → 安装依赖时正常下载；运行时后端还有兜底自动安装。
+ */
+module.exports = executablePath ? { skipDownload, executablePath } : { skipDownload }
