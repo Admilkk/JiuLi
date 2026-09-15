@@ -102,7 +102,7 @@ if (legacy) {
 if (legacy) {
   clear()
   emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#状态' })
-  await sleep(600)
+  await sleep(1400) // 该用例要跑 redis 统计，留足时间避免抢跑
   check(
     '内置 #状态（master + makeForwardArray）',
     json().includes('JiuLi v') && json().includes('运行时间') && json().includes('插件加载用时'),
