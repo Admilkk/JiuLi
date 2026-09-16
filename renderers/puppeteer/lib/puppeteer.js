@@ -426,7 +426,8 @@ export default class Puppeteer extends Renderer {
       Bot.makeLog('mark', `空闲 ${this.idleTime / 60000} 分钟，关闭 Chromium 释放内存（下次截图自动启动）`, 'Render')
       const browser = this.browser
       this.browser = false
-      browser.removeListener('disconnected', this.onDisconnected)
+      /** Browser 只有 on / off，没有 removeListener（用旧 API 会抛错，导致浏览器永远关不掉） */
+      if (typeof browser.off === 'function') browser.off('disconnected', this.onDisconnected)
       this.stop(browser).then(() => this.browserMacKey && redis.del(this.browserMacKey).catch(() => {}))
     }, this.idleTime)
     this.idleTimer.unref?.()

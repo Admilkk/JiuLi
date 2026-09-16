@@ -92,4 +92,22 @@ if (!colored) {
   process.exit(1)
 }
 console.log(`✅ emoji 字体可用 · 👑 彩色像素 ${colored} 个`)
+
+/**
+ * 空闲回收回归：过去这里写的是 browser.removeListener（Browser 没有这个方法），
+ * 抛错后浏览器永远关不掉 —— 内存越吃越多，新装的字体也一直不生效。
+ */
+console.log(`\n浏览器事件接口：off ${typeof browser.off} · removeListener ${typeof browser.removeListener}`)
+const { default: PuppeteerRenderer } = await import('../renderers/puppeteer/lib/puppeteer.js')
+const idle = new PuppeteerRenderer({ idleTime: 0.001 })
+let closed = false
+/** 故意只给 close：模拟没有 removeListener 的 Browser */
+idle.browser = { close: async () => (closed = true), connected: true }
+idle.resetIdleTimer()
+await new Promise(r => setTimeout(r, 400))
+if (!closed) {
+  console.log('❌ 空闲回收没走到 close（浏览器不会被自动关闭）')
+  process.exit(1)
+}
+console.log('✅ 空闲回收生效（超时后正常关闭浏览器）')
 process.exit(0)
