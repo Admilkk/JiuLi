@@ -450,6 +450,15 @@ check(
   diag.slice(0, 80),
 )
 
+/* ---------- 13a. Mock 适配器头像（插件渲染时会用到） ---------- */
+const mockBot = bot.bots?.mock || bot['mock']
+check(
+  'Mock 机器人有头像（data URI）',
+  typeof mockBot?.avatar === 'string' && mockBot.avatar.startsWith('data:image/'),
+  `${String(mockBot?.avatar).slice(0, 30)}… · ${Math.round(String(mockBot?.avatar || '').length / 1024)}KB`,
+)
+check('Mock 联系人可取头像', typeof mockBot?.getAvatarUrl === 'function' && mockBot.getAvatarUrl().startsWith('data:image/'))
+
 /* ---------- 4a3. 运行中配置文件被删 → #设置主人 自愈重建 ---------- */
 {
   await sleep(1200)
