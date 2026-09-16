@@ -62,6 +62,34 @@ if (!browser || typeof browser.newPage !== 'function') {
 const page = await browser.newPage()
 await page.setContent('<h1>插件自截图</h1>')
 const shot = await page.screenshot()
-await page.close()
 console.log(`✅ 插件自截图可用 · ${(shot.length / 1024).toFixed(1)}KB`)
+
+/**
+ * emoji 字体自检：彩色 emoji 画出来是带颜色的，缺字体时的豆腐块是单色的。
+ * 缺字体不会报错，只会在图里显示成方块（插件里的 👑 / 💬 就踩过这个坑）。
+ */
+const colored = await page.evaluate(() => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')
+  ctx.font = '48px sans-serif'
+  ctx.textBaseline = 'top'
+  ctx.fillText('👑', 0, 0)
+  const data = ctx.getImageData(0, 0, 64, 64).data
+  let n = 0
+  for (let i = 0; i < data.length; i += 4) {
+    const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]]
+    if (a > 0 && Math.max(r, g, b) - Math.min(r, g, b) > 40) n++
+  }
+  return n
+})
+await page.close()
+if (!colored) {
+  console.log('❌ emoji 渲染成单色（豆腐块）—— 系统缺 emoji 字体')
+  console.log('   Debian/Ubuntu：apt-get install -y fonts-noto-color-emoji')
+  console.log('   CentOS/RHEL：yum install -y google-noto-color-emoji-fonts')
+  process.exit(1)
+}
+console.log(`✅ emoji 字体可用 · 👑 彩色像素 ${colored} 个`)
 process.exit(0)

@@ -25,6 +25,8 @@ export default class Puppeteer extends Renderer {
     this.lock = false
     this.browserInitPromise = null
     this.shoting = []
+    /** 字体自检只做一次 */
+    this.fontChecked = false
     /** 截图数达到时重启浏览器，避免生成速度越来越慢 */
     this.restartNum = config.restartNum || 100
     /** 截图次数 */
@@ -118,16 +120,16 @@ export default class Puppeteer extends Renderer {
     if (!process.env.JIULI_NO_AUTO_INSTALL && process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
       const has = c => Boolean(fromPath(c))
       const install = has('apt-get')
-        ? 'apt-get update -qq && apt-get install -y -qq chromium fonts-noto-cjk'
+        ? 'apt-get update -qq && apt-get install -y -qq chromium fonts-noto-cjk fonts-noto-color-emoji'
         : has('dnf')
-          ? 'dnf install -y chromium google-noto-sans-cjk-fonts'
+          ? 'dnf install -y chromium google-noto-sans-cjk-fonts google-noto-color-emoji-fonts'
           : has('yum')
-            ? 'yum install -y chromium'
+            ? 'yum install -y chromium google-noto-color-emoji-fonts'
             : ''
       if (install) {
         Bot.makeLog(
           'warn',
-          `没找到浏览器，正在自动安装：${install}\n  （中文字体一并安装，否则截图里的中文会变成方块；不想自动装可配置 chromium_path）`,
+          `没找到浏览器，正在自动安装：${install}\n  （中文字体与 emoji 字体一并安装，否则截图里的中文/emoji 会变成方块；不想自动装可配置 chromium_path）`,
           'Render',
         )
         try {
@@ -162,7 +164,41 @@ export default class Puppeteer extends Renderer {
     return ''
   }
 
+  /**
+   * 中文字体 / emoji 字体自检
+   *
+   * 缺字体时截图里只会出现方块，不报任何错（插件的 👑 / 💬 就这样变成过豆腐块），
+   * 所以在启动浏览器时提醒一次。
+   */
+  async checkFonts() {
+    if (process.platform !== 'linux' || this.fontChecked) return
+    const { execSync } = await import('node:child_process')
+    const has = cmd => {
+      try {
+        return Boolean(execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim())
+      } catch {
+        return false
+      }
+    }
+    if (!has('command -v fc-list')) return
+    this.fontChecked = true
+
+    const missing = []
+    if (!has('fc-list :lang=zh | head -1')) missing.push(['中文字体', 'fonts-noto-cjk'])
+    if (!has('fc-list | grep -i emoji | head -1')) missing.push(['emoji 字体', 'fonts-noto-color-emoji'])
+    if (!missing.length) return
+
+    Bot.makeLog(
+      'warn',
+      `系统缺少${missing.map(i => i[0]).join(' / ')}，截图里会显示成方块（不会报错）\n` +
+        `  Debian/Ubuntu：apt-get install -y ${missing.map(i => i[1]).join(' ')}\n` +
+        '  CentOS/RHEL：yum install -y google-noto-sans-cjk-fonts google-noto-color-emoji-fonts',
+      'Render',
+    )
+  }
+
   async createBrowser() {
+    await this.checkFonts()
     const headless = this.config.headless === true || this.config.headless === 'new'
     let execPath = await this.resolveExecutable()
     if (execPath) this.config.executablePath = execPath
