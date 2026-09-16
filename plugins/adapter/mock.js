@@ -13,6 +13,8 @@
  * 机器人发出的消息记录在 globalThis.__jiuli_mock_sent（数组）
  */
 
+import fs from 'node:fs'
+
 /** 已发送消息记录 */
 const SENT = []
 globalThis.__jiuli_mock_sent = SENT
@@ -21,6 +23,25 @@ const RECALL = []
 globalThis.__jiuli_mock_recall = RECALL
 
 const UIN = 'mock'
+
+/**
+ * 机器人头像：用随仓库分发的 plugins/adapter/mock-avatar.jpg，转成 data URI。
+ * 走 data URI 是为了离线也能渲染（插件常把 bot.avatar 直接塞进 HTML 截图）。
+ */
+const AVATAR = (() => {
+  try {
+    const file = 'plugins/adapter/mock-avatar.jpg'
+    if (!fs.existsSync(file)) return ''
+    return `data:image/jpeg;base64,${fs.readFileSync(file).toString('base64')}`
+  } catch {
+    return ''
+  }
+})()
+
+/** 成员/好友头像：假账号没有真实头像，统一给机器人这张，避免渲染出裂图 */
+function avatarOf() {
+  return AVATAR
+}
 
 function makeContact(type, id) {
   const contact = {
@@ -52,6 +73,13 @@ function makeContact(type, id) {
     getInfo() {
       return this
     },
+  }
+  /** 头像：插件渲染时常用 e.sender.avatar / getAvatarUrl() */
+  if (AVATAR) {
+    Object.assign(contact, {
+      avatar: avatarOf(),
+      getAvatarUrl: () => avatarOf(),
+    })
   }
   if (type === 'group') {
     Object.assign(contact, {
@@ -103,6 +131,8 @@ const adapter = {
       uin: UIN,
       nickname: 'JiuLi-Mock',
       version: 'mock-1.0.0',
+      avatar: AVATAR,
+      getAvatarUrl: () => AVATAR,
       fl,
       gl,
       gml,
@@ -199,6 +229,8 @@ const adapter = {
           nickname: `测试用户${user_id}`,
           card: `测试群名片${user_id}`,
           role: ev.role || 'member',
+          avatar: AVATAR,
+          getAvatarUrl: () => AVATAR,
         },
         time: Math.floor(Date.now() / 1000),
       })

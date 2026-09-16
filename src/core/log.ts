@@ -140,13 +140,19 @@ function output(level: string, args: any[], id?: string | false, raw = false) {
   const color = String(source) === DEFAULT_ID ? chalk.bold.green : chalk.blue
   const tag = id === false ? '' : `${color(`[${name}]`)} `
   const msg = `${timeStr()} ${style(level.toUpperCase().padEnd(5))} ${tag}${renderArgs(args)}`
-  if (sizeOf(level) === 'error') console.error(msg)
+  const size = sizeOf(level)
+  if (size === 'error') console.error(msg)
   else console.log(msg)
 
   const line = `${stripColor(msg)}\n`
   const day = dateStr()
   fileWriter.write(path.join(logDir, `jiuli.${day}.log`), line)
-  if (sizeOf(level) === 'error') fileWriter.write(path.join(logDir, 'error', `error.${day}.log`), line)
+  /** 云崽的日志文件名，插件会直接读这两个文件（如按指令/错误列日志） */
+  if (size === 'command') fileWriter.write(path.join(logDir, `command.${day}.log`), line)
+  if (size === 'error') {
+    fileWriter.write(path.join(logDir, 'error.log'), line)
+    fileWriter.write(path.join(logDir, 'error', `error.${day}.log`), line)
+  }
 }
 
 /** 带来源列的写入入口：框架内部（util.makeLog）用它把模块名放进日志左边那列 */

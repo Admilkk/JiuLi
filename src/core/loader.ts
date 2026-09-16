@@ -593,7 +593,7 @@ class PluginsLoader {
 
           util.makeLog(
             v.log === false ? 'debug' : 'info',
-            `中 ▶ ${logger.green.bold(i.name)} ${logger.gray(`<${i.key}>`)} · 规则 ${logger.gray(regStr)} · 方法 ${logger.cyan(
+            `中 ▶ ${logger.greenBright.bold(i.name)} ${logger.cyan(`<${i.key}>`)} · 规则 ${logger.yellow(regStr)} · 方法 ${logger.cyan(
               fncName,
             )} · 优先级 ${i.priority}`,
             'Plugin',
@@ -607,14 +607,19 @@ class PluginsLoader {
               /** 绑定到插件实例，保持与云崽一致的 this 语义 */
               const fn =
                 typeof v.fnc === 'function' ? v.fnc.bind(instance) : instance[v.fnc]?.bind(instance)
-              const res = fn && (await fn(e, (v.reg as RegExp).exec(String(e.msg)) || undefined))
+              /**
+               * 云崽只传 e，故第二个参数只在插件方法自己声明了参数时才给（正则捕获结果）。
+               * 无条件传会把 `fnc(e, isYesterday = false)` 这类插件的布尔开关顶成真值。
+               */
+              const args: any[] = fn?.length >= 2 ? [e, (v.reg as RegExp).exec(String(e.msg)) || undefined] : [e]
+              const res = fn && (await fn(...args))
               const cost = Date.now() - startTime
               metrics.record(i, cost)
 
               if (res === false) {
                 util.makeLog(
                   v.log === false ? 'debug' : 'mark',
-                  `${logger.green.bold(i.name)} · 返回 false，继续匹配后续规则 · ${util.colorCost(cost)}`,
+                  `${logger.greenBright.bold(i.name)} · 返回 false，继续匹配后续规则 · ${util.colorCost(cost)}`,
                   'Plugin',
                 )
                 continue

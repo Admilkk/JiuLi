@@ -116,6 +116,40 @@ export class RendererLoader {
     for (const img of Array.isArray(imgs) ? imgs : [imgs]) ret.push(img ? (segment ? segment.image(img) : img) : img)
     return ret.length > 0 ? ret : false
   }
+
+  /** 当前真正干活的渲染后端（浏览器相关接口都转发给它） */
+  get backend(): any {
+    return this.renderers.get(cfg.renderer?.name as string) || [...this.renderers.values()][0]
+  }
+
+  /**
+   * 兼容云崽 puppeteer.browserInit()：返回已启动的浏览器实例。
+   * 插件拿它自己 newPage 截图（如「谁艾特我」「水群统计」这类自带 HTML 的插件）。
+   */
+  async browserInit() {
+    if (!this.loaded) await this.load()
+    const backend = this.backend
+    if (!backend) return false
+    if (backend.browser) return backend.browser
+    return backend.browserInit ? backend.browserInit() : false
+  }
+
+  get browser() {
+    return this.backend?.browser
+  }
+
+  get browserIsOpen() {
+    return Boolean(this.backend?.browser)
+  }
+
+  /** 重启浏览器（下次截图时重新拉起） */
+  async restart(force = true) {
+    return this.backend?.restart?.(force)
+  }
+
+  async stop() {
+    return this.backend?.stop?.(this.backend.browser)
+  }
 }
 
 export default new RendererLoader()

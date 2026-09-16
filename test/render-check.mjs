@@ -48,4 +48,20 @@ const size = Buffer.isBuffer(file)
     : JSON.stringify(img).length
 console.log(`\n✅ 渲染成功 · 用时 ${cost}ms · 产物 ${(size / 1024).toFixed(1)}KB`)
 console.log('   若刚才日志里有 [  Render  ] 自动安装 一行，说明框架帮你把浏览器补上了')
+
+/** 云崽插件会 import lib/puppeteer/puppeteer.js 后自己 newPage 截图 */
+const { default: puppeteer } = await import('../lib/puppeteer/puppeteer.js')
+console.log(
+  `\n浏览器接口：browserInit ${typeof puppeteer.browserInit} · browserIsOpen ${puppeteer.browserIsOpen} · screenshot ${typeof puppeteer.screenshot}`,
+)
+const browser = await puppeteer.browserInit()
+if (!browser || typeof browser.newPage !== 'function') {
+  console.log('❌ puppeteer.browserInit() 没返回可用的浏览器实例（插件自己截图会报 not a function）')
+  process.exit(1)
+}
+const page = await browser.newPage()
+await page.setContent('<h1>插件自截图</h1>')
+const shot = await page.screenshot()
+await page.close()
+console.log(`✅ 插件自截图可用 · ${(shot.length / 1024).toFixed(1)}KB`)
 process.exit(0)
