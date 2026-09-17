@@ -8,7 +8,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-const PLUGIN = (process.env.TRSS_PLUGIN_DIR || 'D:/yunzaibot/TRSS/Yunzai/plugins/TRSS-Plugin').split('\\').join('/')
+const PLUGIN = (process.env.TRSS_PLUGIN_DIR || 'D:/yunzaibot/JiuLi/jiuli/plugins/TRSS-Plugin').split('\\').join('/')
 /** 没装 TRSS-Plugin 就跳过（可选用例） */
 if (!fs.existsSync(PLUGIN)) {
   console.log(`⏭️  未找到 TRSS-Plugin（${PLUGIN}），跳过`)
