@@ -71,13 +71,19 @@ export default class Diagnose extends JiuLiPlugin {
     /** 消息日志开关 */
     lines.push(`【日志】等级 ${logger.getLevel()} · 消息内容记录 ${cfg.bot.log_msg === false ? '关闭' : '开启'}（config/config/bot.yaml）`)
 
-    /** 最近收发 */
+    /** 最近收发（只留最近 5 条，太多会把聊天顶掉） */
+    const RECENT_MAX = 5
     const fmt = i => `${moment(i.time).format('HH:mm:ss')} ${i.scene} · ${i.content}${i.matched ? ` → ${i.matched}` : ''}`
     const recent = PluginsLoader.recent
-    lines.push(`【最近收到】${recent.receive.length ? `\n${recent.receive.map(fmt).join('\n')}` : '无'}`)
+    const tail = list => list.slice(-RECENT_MAX)
+    lines.push(`【最近收到】${recent.receive.length ? `\n${tail(recent.receive).map(fmt).join('\n')}` : '无'}`)
     lines.push(
       `【最近发出】${
-        recent.send.length ? `\n${recent.send.map(i => `${moment(i.time).format('HH:mm:ss')} ${i.scene} · ${i.content}${i.plugin ? ` · 由 ${i.plugin}` : ''}`).join('\n')}` : '无'
+        recent.send.length
+          ? `\n${tail(recent.send)
+              .map(i => `${moment(i.time).format('HH:mm:ss')} ${i.scene} · ${i.content}${i.plugin ? ` · 由 ${i.plugin}` : ''}`)
+              .join('\n')}`
+          : '无'
       }`,
     )
 
@@ -86,6 +92,7 @@ export default class Diagnose extends JiuLiPlugin {
     if (slow.length)
       lines.push(`【偏慢插件】${slow.map(i => `${i.name} 均 ${(i.total / i.count).toFixed(0)}ms`).join(' · ')}`)
 
-    return this.reply(lines.join('\n'))
+    /** 十几行直接发会刷屏，走合并转发；每条一行，方便在转发里逐条看 */
+    return this.reply(Bot.makeForwardArray([`JiuLi 诊断报告 · ${moment().format('YYYY-MM-DD HH:mm:ss')}`, ...lines]))
   }
 }

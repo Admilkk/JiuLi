@@ -6,6 +6,8 @@ log_length: 10000
 log_object: true
 # 日志ID对齐
 log_align: "  JiuLi  "
+# 同一条日志在这个秒数内重复出现时，终端只留第一条 + 折叠计数（日志文件始终完整；0 关闭）
+log_dedupe: 10
 # 记录消息收发内容（收 ◀ / 发 ▶），false 则只记录插件执行
 log_msg: true
 # 消息内容预览长度

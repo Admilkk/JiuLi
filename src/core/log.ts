@@ -131,28 +131,81 @@ function sizeOf(level: string): 'command' | 'error' | 'default' {
   return 'default'
 }
 
+/** 重复日志折叠窗口（秒，0 关闭）：插件刷同一条日志时终端只留一条 */
+function dedupeWindow() {
+  const sec = (globalThis as any).cfg?.bot?.log_dedupe
+  if (sec === 0 || sec === false) return 0
+  const n = Number(sec)
+  return (Number.isFinite(n) && n > 0 ? n : 10) * 1000
+}
+
+/** 上一条日志的重复情况（只用于终端折叠，文件始终完整） */
+const repeat = { key: '', level: 'info', id: undefined as any, count: 0, at: 0, startedAt: 0 }
+
+/** 判断当前这条要不要打印；返回上一条的折叠汇总（如果有） */
+function trackRepeat(key: string, level: string, id: any) {
+  const window = dedupeWindow()
+  if (!window) return { print: true, folded: null as any }
+  const now = Date.now()
+  if (key === repeat.key && now - repeat.at < window) {
+    repeat.count++
+    repeat.at = now
+    return { print: false, folded: null }
+  }
+  const folded = repeat.key && repeat.count > 1 ? { ...repeat } : null
+  repeat.key = key
+  repeat.level = level
+  repeat.id = id
+  repeat.count = 1
+  repeat.at = now
+  repeat.startedAt = now
+  return { print: true, folded }
+}
+
 function output(level: string, args: any[], id?: string | false, raw = false) {
   if (!isEnabled(level)) return
-  const style = LEVEL_STYLE[level] || ((str: string) => str)
-  /** id 为 false 表示这行不带来源列；raw 用于长 id（如 `10001 => 20002`），不做对齐 */
-  const source = id ?? DEFAULT_ID
-  const name = raw ? String(source) : alignId(String(source))
-  const color = String(source) === DEFAULT_ID ? chalk.bold.green : chalk.blue
-  const tag = id === false ? '' : `${color(`[${name}]`)} `
-  const msg = `${timeStr()} ${style(level.toUpperCase().padEnd(5))} ${tag}${renderArgs(args)}`
+  const plain = renderArgs(args)
   const size = sizeOf(level)
-  if (size === 'error') console.error(msg)
-  else console.log(msg)
 
-  const line = `${stripColor(msg)}\n`
-  const day = dateStr()
-  fileWriter.write(path.join(logDir, `jiuli.${day}.log`), line)
-  /** 云崽的日志文件名，插件会直接读这两个文件（如按指令/错误列日志） */
-  if (size === 'command') fileWriter.write(path.join(logDir, `command.${day}.log`), line)
-  if (size === 'error') {
-    fileWriter.write(path.join(logDir, 'error.log'), line)
-    fileWriter.write(path.join(logDir, 'error', `error.${day}.log`), line)
+  /** 按「等级 + 来源列 + 内容」拼一行；折叠汇总复用同一个格式 */
+  const format = (text: string, lvl: string, sourceId: any) => {
+    const style = LEVEL_STYLE[lvl] || ((str: string) => str)
+    /** id 为 false 表示这行不带来源列；raw 用于长 id（如 `10001 => 20002`），不做对齐 */
+    const source = sourceId ?? DEFAULT_ID
+    const name = raw ? String(source) : alignId(String(source))
+    const color = String(source) === DEFAULT_ID ? chalk.bold.green : chalk.blue
+    const tag = sourceId === false ? '' : `${color(`[${name}]`)} `
+    return `${timeStr()} ${style(lvl.toUpperCase().padEnd(5))} ${tag}${text}`
   }
+
+  /** 终端 + 文件；文件里始终是完整日志（含被折叠的每一条），print=false 时只写文件 */
+  const emit = (text: string, lvl: string, sourceId: any, print = true) => {
+    const msg = format(text, lvl, sourceId)
+    if (print) {
+      if (sizeOf(lvl) === 'error') console.error(msg)
+      else console.log(msg)
+    }
+
+    const line = `${stripColor(msg)}\n`
+    const day = dateStr()
+    fileWriter.write(path.join(logDir, `jiuli.${day}.log`), line)
+    /** 云崽的日志文件名，插件会直接读这两个文件（如按指令/错误列日志） */
+    if (sizeOf(lvl) === 'command') fileWriter.write(path.join(logDir, `command.${day}.log`), line)
+    if (sizeOf(lvl) === 'error') {
+      fileWriter.write(path.join(logDir, 'error.log'), line)
+      fileWriter.write(path.join(logDir, 'error', `error.${day}.log`), line)
+    }
+  }
+
+  const { print, folded } = trackRepeat(`${level}|${String(id)}|${plain}`, level, id)
+  /** 同一内容刷屏时，终端只留第一条 + 折叠计数；写文件不受影响 */
+  if (folded)
+    emit(
+      `↑ 相同内容 ${Math.max(1, Math.round((folded.at - folded.startedAt) / 1000))} 秒内重复 ${folded.count} 次，已折叠（完整日志见 logs/）`,
+      folded.level,
+      folded.id,
+    )
+  emit(plain, level, id, print)
 }
 
 /** 带来源列的写入入口：框架内部（util.makeLog）用它把模块名放进日志左边那列 */
