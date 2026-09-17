@@ -48,7 +48,8 @@
     "test:args": "node test/rule-args.mjs",
     "test:deps": "node test/deps-check.mjs",
     "test:logdedupe": "node test/log-dedupe.mjs",
-    "test:trss": "node test/trss-archive.mjs"
+    "test:trss": "node test/trss-archive.mjs",
+    "test:trsstpl": "node test/trss-template.mjs"
   },
   "imports": {
     "#miao": "./plugins/miao-plugin/components/index.js",
