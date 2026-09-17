@@ -449,6 +449,7 @@ check(
   diag.includes('适配器') && diag.includes('在线账号') && diag.includes('最近收到'),
   diag.slice(0, 80),
 )
+check('内置 #诊断 显示系统命令自检（ffmpeg）', diag.includes('【系统命令】') && diag.includes('ffmpeg'))
 
 /* ---------- 13a. Mock 适配器头像（插件渲染时会用到） ---------- */
 const mockBot = bot.bots?.mock || bot['mock']

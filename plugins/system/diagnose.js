@@ -1,5 +1,5 @@
 import { JiuLiPlugin, cfg } from 'jiuli'
-import { PluginsLoader, MemoryRedis, renderService, metrics } from 'jiuli/core'
+import { PluginsLoader, MemoryRedis, renderService, metrics, SYSTEM_DEPS, depPath } from 'jiuli/core'
 import moment from 'moment'
 
 /**
@@ -56,6 +56,11 @@ export default class Diagnose extends JiuLiPlugin {
         ? '无可用后端'
         : [...renderService.renderers.keys()].join(', ') + (puppeteer?.browser ? ' · Chromium 运行中' : ' · Chromium 未启动（首次截图时启动）')
     lines.push(`【渲染】${renderState}`)
+
+    /** 外部命令（插件常依赖，缺了只在插件运行时报 Command failed） */
+    const bins = []
+    for (const dep of SYSTEM_DEPS) bins.push(`${dep.cmd} ${(await depPath(dep)) ? '✓' : '✗（缺了会影响：' + dep.desc + '）'}`)
+    lines.push(`【系统命令】${bins.join(' · ')}`)
 
     /** 主人 */
     const masters = Object.entries(cfg.master || {})

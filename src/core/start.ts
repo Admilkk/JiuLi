@@ -105,6 +105,9 @@ export async function start() {
   })
 
   await bot.run()
+  /** 外部命令（ffmpeg 等）自检，缺失时自动补装；不阻塞启动 */
+  const { ensureDeps } = await import('./deps.js')
+  ensureDeps().catch((err: any) => util.makeLog('error', ['系统命令自检失败', err], 'Deps'))
   return bot
 }
 
