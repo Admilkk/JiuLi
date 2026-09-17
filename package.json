@@ -47,7 +47,8 @@
     "test:install": "node test/install-plugin.mjs",
     "test:args": "node test/rule-args.mjs",
     "test:deps": "node test/deps-check.mjs",
-    "test:logdedupe": "node test/log-dedupe.mjs"
+    "test:logdedupe": "node test/log-dedupe.mjs",
+    "test:trss": "node test/trss-archive.mjs"
   },
   "imports": {
     "#miao": "./plugins/miao-plugin/components/index.js",
