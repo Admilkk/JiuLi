@@ -125,6 +125,35 @@ async init() {
 实例属性：`this.e`、`this.dataDir`（`data/plugins/<插件名>/`）、`this.resDir`、
 `this.render` / `this.renderBase64`、`this.reply`。
 
+## 热重载与模块级资源
+
+改 `plugins/` 下的 js（含目录型插件的 `apps/`、`lib/`）等 2 秒自动生效，原理见
+[架构说明](architecture.md#插件热重载)：**整张插件模块图会重新求值**，也就是模块顶层的代码
+会再跑一遍。这带来一条必须遵守的约定：
+
+- **实例资源**用 `onUnload()` 清理：卸载 / 热重载前框架会调用它（定时器、socket、进程）。
+- **模块级资源**（在文件顶层 `setInterval`、`fs.watch`、开数据库句柄、起浏览器、注册全局监听）
+  必须在入口里自己交接 —— 旧的模块图收不到任何通知，Node 已经把它从缓存里换掉了。写法是把
+  「交还资源」的函数挂在 `globalThis` 上，新的一次加载先 await 上一个：
+
+  ```js
+  // index.js（目录型入口）
+  if (typeof globalThis.__myPluginHandoff === 'function') {
+    try { await globalThis.__myPluginHandoff() } catch (e) { logger.warn('上一个模块图交还资源失败', e) }
+  }
+
+  startWatcher()                      // 顶层建资源
+  globalThis.__myPluginHandoff = () => stopWatcher()
+  ```
+
+  用 `globalThis` 而不是模块级变量，是因为模块级变量在重新求值后已经清零，新图看不见旧图
+  握着什么。不这么做的话，每热重载一次就多一份：定时任务跑两遍、文件变更处理两次、
+  浏览器进程留在系统里。
+
+- 把「该用哪份清理函数」存成可覆盖的指针（而不是闭包抓住当前这份）同样重要：挂钩子
+  （`process.on('exit')`、包 `Bot.restart`）的代码跨模块图存活，闭包里那份属于旧图、
+  资源早交出去了，重启/退出时新图的资源就没人收。
+
 ## 事件对象 `e`
 
 `msg` / `raw_message` / `message` / `img` / `at` / `atBot` / `user_id` / `group_id` / `self_id` /
@@ -229,4 +258,5 @@ Bot.adapter.push({
 - `JIULI_MOCK_STDIN=1 node .` 后，stdin 每行一个 JSON 事件
 - 日志等级：`config/config/bot.yaml → log_level: debug`
 - `#玖璃性能`（示例插件提供）或 `import { metrics } from 'jiuli'` 看耗时排行
-- 改文件等 2 秒自动热重载；没生效看 `file_watch` 是否为 false，或 `#重载`
+- 改文件等 2 秒自动热重载（`apps/`、`lib/` 里的嵌套模块也会重新求值，见
+  [热重载与模块级资源](#热重载与模块级资源)）；没生效看 `file_watch` 是否为 false，或 `#重载`

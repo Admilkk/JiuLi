@@ -14,6 +14,8 @@ import Handler from './handler.js'
 import util from './util.js'
 import { logger } from './log.js'
 import metrics from './metrics.js'
+import { runAsLoading } from './loading.js'
+import { bumpModuleGeneration, enableModuleReload } from './reload-hooks.js'
 import type { JiuLiEvent, PluginEntry } from './types.js'
 
 /** 兼容旧插件直接使用全局 plugin */
@@ -84,6 +86,13 @@ class PluginsLoader {
   pluginCountMap = new Map<string, number>()
   pluginCount = 0
   load_time: Record<string, number> = {}
+  /**
+   * 插件首次加载的顺序号，重载时保持不变。
+   * priority 相同的插件靠它决定谁先匹配（见 sortPriority），不这么做的话重载会把插件
+   * 挤到同优先级队伍的最后，抢指令的结果就变了。
+   */
+  private pluginOrder = new Map<string, number>()
+  private orderSeq = 0
   eventCache = new WeakMap<object, { source: string; event: string[] }>()
   eventMap: Record<string, string[]> = {
     message: ['post_type', 'message_type', 'sub_type'],
@@ -130,8 +139,24 @@ class PluginsLoader {
     if (isRefresh) {
       const keys = new Set([...this.priority.map(i => i.key), ...this.taskMap.keys(), ...this.pluginCountMap.keys()])
       for (const key of keys) await this.unloadPlugin(key)
+      /** 整目录刷新：代数 +1，所有插件的模块图都换新 */
+      bumpModuleGeneration()
     }
     if (this.priority.length) return
+
+    /**
+     * 先装模块解析钩子，再导入任何插件：插件目录下的模块会被打上代数戳，
+     * 重载时代数 +1 即可让整张模块图（含 apps/ lib/ 里的嵌套模块）重新求值。
+     * Node 偏老没有这个钩子时只提示一次，别让用户以为改了代码就一定生效。
+     */
+    const moduleReload = enableModuleReload(this.dir)
+    if (!moduleReload)
+      util.makeLog(
+        'warn',
+        `当前 Node（${process.version}）不支持模块图热重载：改插件代码后只有入口文件会重新求值，` +
+          `目录型插件（index.js + apps/ + lib/）需要 #重启。升级到 Node 22.15+ 可修复`,
+        'Plugin',
+      )
 
     util.makeLog('info', '扫描插件目录 plugins/ …', 'Plugin')
 
@@ -224,7 +249,7 @@ class PluginsLoader {
       )
 
     /** 优先级排序 */
-    this.priority.sort((a, b) => a.priority - b.priority)
+    this.sortPriority()
 
     /** 加载阶段结束：此后才就绪的插件（超时后才 import 完）会被自动补进分发 */
     this.loaded = true
@@ -237,7 +262,7 @@ class PluginsLoader {
     const mine = this.priority.filter(i => i.key === file.name)
     if (!mine.length) return
     this.buildEventIndex()
-    this.priority.sort((a, b) => a.priority - b.priority)
+    this.sortPriority()
     this.createTask()
     util.makeLog(
       'mark',
@@ -255,6 +280,22 @@ class PluginsLoader {
       list.push(entry)
       this.eventIndex.set(bucket, list)
     }
+  }
+
+  /**
+   * 排序插件：优先级升序（小的先匹配），**并用「首次加载顺序」兜底**。
+   *
+   * 原来只有 `a.priority - b.priority`，priority 相同时靠 Array.sort 的稳定性维持
+   * 「扫描顺序即匹配顺序」。而重载是把该插件的条目删掉、重新 push 到数组末尾 ——
+   * 于是重载过的插件在同优先级里掉到最末，谁抢到指令就变了。生态插件的 priority 大量
+   * 写 `-Infinity`（还互相重叠，比如 miao 的 `#更新面板` 与 system/update.js 的
+   * `^#更新`），实测重载 miao-plugin 之后 `#更新面板` 被系统更新插件顶掉，重启才恢复。
+   *
+   * 注意 `-Infinity - -Infinity = NaN`，而 NaN 是假值，`||` 会兜到顺序号比较 ——
+   * 正好是想要的「同优先级按加载顺序」。
+   */
+  private sortPriority() {
+    this.priority.sort((a, b) => a.priority - b.priority || (a.order ?? 0) - (b.order ?? 0))
   }
 
   /** 候选插件：事件索引命中桶 + 通配桶 */
@@ -275,7 +316,12 @@ class PluginsLoader {
   describeLoadError(error: any, file: { name: string }): { text: string; pkg: boolean } {
     const msg = String(error?.message || error)
     const head = `插件加载错误 ${logger.red(file.name)} · `
-    const rel = (p: string) => String(p).replace(/\\/g, '/').replace(`${process.cwd().replace(/\\/g, '/')}/`, '')
+    /** 展示路径去掉模块 URL 上的查询串（热重载给插件模块加的 ?jiuli_reload=N / 入口的时间戳），只留文件名 */
+    const rel = (p: string) =>
+      String(p)
+        .replace(/\?[^\s')]*$/, '')
+        .replace(/\\/g, '/')
+        .replace(`${process.cwd().replace(/\\/g, '/')}/`, '')
 
     /** 路径型模块找不到：插件少放文件 / 相对路径写错（Windows 下 imported from 后不带引号） */
     const missing = msg.match(/Cannot find module '([^']+)'(?:\s+imported from\s+'?([^'\s]+)'?)?/)
@@ -330,32 +376,36 @@ class PluginsLoader {
     const start_time = Date.now()
     let success = true
     this.pluginCountMap.set(file.name, 0)
-    /** 标记当前加载的插件，Bot 据此登记该插件注册的 express 路由与 WS 路径 */
-    const prevLoading = (globalThis as any).__jiuliLoading
-    ;(globalThis as any).__jiuliLoading = file.name
+    /**
+     * 在「正在加载 file.name」的上下文里导入，Bot 据此登记该插件注册的 express 路由与
+     * WS 路径。必须走 runAsLoading（AsyncLocalStorage）而不是只设全局变量：插件是并行
+     * 导入的，全局量会被别的插件改掉，路由就会记到别人名下（见 lib/core/loading.ts）。
+     */
     try {
-      const module: any = await import(file.path)
-      const app = module.apps ? { ...module.apps } : module
-      /**
-       * 同一个类可能既作 default 又作具名导出（如 system/restart.js 的 Restart），
-       * 逐个实例化会让它的 init() 跑多次 —— 重复注册事件监听与定时任务。
-       */
-      const seen = new Set<any>()
-      const pluginArray: any[] = []
-      for (const key in app) {
-        const item = app[key]
-        if (seen.has(item)) continue
-        seen.add(item)
-        pluginArray.push(this.loadPlugin(file, item))
-      }
-      for (const i of await Promise.allSettled(pluginArray))
-        if (i?.status && i.status !== 'fulfilled') {
-          success = false
-          const info = this.describeLoadError(i.reason, file)
-          util.makeLog('error', info.text, 'Plugin')
-          util.makeLog('debug', [`${file.name} 加载失败详情`, i.reason], 'Plugin')
-          if (packageErr && info.pkg) packageErr.push({ error: i.reason, file })
+      await runAsLoading(file.name, async () => {
+        const module: any = await import(file.path)
+        const app = module.apps ? { ...module.apps } : module
+        /**
+         * 同一个类可能既作 default 又作具名导出（如 system/restart.js 的 Restart），
+         * 逐个实例化会让它的 init() 跑多次 —— 重复注册事件监听与定时任务。
+         */
+        const seen = new Set<any>()
+        const pluginArray: any[] = []
+        for (const key in app) {
+          const item = app[key]
+          if (seen.has(item)) continue
+          seen.add(item)
+          pluginArray.push(this.loadPlugin(file, item))
         }
+        for (const i of await Promise.allSettled(pluginArray))
+          if (i?.status && i.status !== 'fulfilled') {
+            success = false
+            const info = this.describeLoadError(i.reason, file)
+            util.makeLog('error', info.text, 'Plugin')
+            util.makeLog('debug', [`${file.name} 加载失败详情`, i.reason], 'Plugin')
+            if (packageErr && info.pkg) packageErr.push({ error: i.reason, file })
+          }
+      })
     } catch (error: any) {
       success = false
       const info = this.describeLoadError(error, file)
@@ -371,7 +421,6 @@ class PluginsLoader {
           'Plugin',
         )
     } finally {
-      ;(globalThis as any).__jiuliLoading = prevLoading
       /**
        * 加载成功但没有任何插件类（适配器 / 纯胶水文件）：#重载 时不必再导入。
        * 加载失败的**不能**记为惰性，否则修好后 #重载 会一直跳过它。
@@ -407,6 +456,12 @@ class PluginsLoader {
       }
 
     const namespace = instance.namespace || file.name
+    /** 首次加载时分配顺序号；重载复用同一个号，保证同优先级下的先后顺序不变 */
+    let order = this.pluginOrder.get(file.name)
+    if (order === undefined) {
+      order = this.orderSeq++
+      this.pluginOrder.set(file.name, order)
+    }
     this.priority.push({
       plugin: instance,
       class: p,
@@ -415,6 +470,7 @@ class PluginsLoader {
       name: instance.name || p.name || file.name,
       priority: instance.priority,
       namespace,
+      order,
     })
     this.registerHandlers(instance, namespace)
   }
@@ -1128,6 +1184,11 @@ class PluginsLoader {
     const oldPluginCount = this.pluginCount
     try {
       await this.unloadPlugin(key)
+      /**
+       * 代数 +1 再导入：入口里 `import './apps/x.js'` 这类嵌套模块会以新 URL 解析，
+       * 整张插件模块图重新求值 —— 不然日志写着「重载」，跑的仍是缓存里的旧代码。
+       */
+      bumpModuleGeneration()
       /** 目录型插件需指向 index.js，Node 不支持目录 import */
       const target = key.endsWith('.js') ? key : `${key}/index.js`
       const success = await this.importPlugin({
@@ -1147,7 +1208,7 @@ class PluginsLoader {
         if (oldPluginFileCount !== undefined) this.pluginCountMap.set(key, oldPluginFileCount)
         for (const i of oldPriority) this.registerHandlers(i.plugin, i.namespace || key)
       }
-      this.priority.sort((a, b) => a.priority - b.priority)
+      this.sortPriority()
       this.buildEventIndex()
       this.createTask()
       return success
@@ -1185,9 +1246,11 @@ class PluginsLoader {
   }
 
   private async loadKey(key: string) {
+    /** 新增/补漏加载也换一代：与磁盘上已改过的文件保持一致 */
+    bumpModuleGeneration()
     const target = key.endsWith('.js') ? key : `${key}/index.js`
     await this.importPlugin({ name: key, path: `../../${this.dir}/${target}?${Date.now()}` })
-    this.priority.sort((a, b) => a.priority - b.priority)
+    this.sortPriority()
     this.buildEventIndex()
     this.createTask()
   }
@@ -1209,33 +1272,76 @@ class PluginsLoader {
 
     const relOf = (file: string) => path.relative(path.resolve(root), path.resolve(file)).replace(/\\/g, '/')
 
-    const handle = (action: 'add' | 'change' | 'unlink') =>
-      util.debounce(async (file: string) => {
-        const rel = relOf(file)
-        if (!rel || rel.startsWith('..')) return
-        if (!rel.endsWith('.js')) {
-          if (action === 'change') util.makeLog('debug', `资源变化（无需重载）· ${rel}`, 'Plugin')
-          return
-        }
-        const key = this.keyOf(rel)
-        if (!key) return
+    /**
+     * 事件合并：2 秒窗口内的事件先收进待处理表，窗口结束时**逐个**处理。
+     *
+     * 原来每种事件各自走 `util.debounce`，而 debounce 在窗口内只保留最后一次调用 ——
+     * 快速连改多个文件（IDE 的「全部保存」、脚本批量改、一次新建整个插件目录）只有最后一个
+     * 会触发重载，其余静默丢掉，这也是「改了文件却没生效」的一个来源。
+     * 现在按文件记下最后一个动作，到点后整批处理；同一个插件的多个文件只处理一次。
+     */
+    const pendingEvents = new Map<string, 'add' | 'change' | 'unlink'>()
+    let flushTimer: NodeJS.Timeout | undefined
 
-        if (action === 'unlink') {
-          if (!this.isLoaded(key)) return
-          util.makeLog('mark', `插件已删除 → 卸载 · ${logger.cyan(rel)}`, 'Plugin')
-          await this.unloadPlugin(key)
-          return
-        }
+    const processEvent = async (file: string, action: 'add' | 'change' | 'unlink') => {
+      const rel = relOf(file)
+      if (!rel || rel.startsWith('..')) return
+      if (!rel.endsWith('.js')) {
+        if (action === 'change') util.makeLog('debug', `资源变化（无需重载）· ${rel}`, 'Plugin')
+        return
+      }
+      const key = this.keyOf(rel)
+      if (!key) return
 
-        const loaded = this.isLoaded(key)
-        util.makeLog(
-          'mark',
-          `插件${action === 'add' ? '新增' : '修改'} → ${loaded ? '重载' : '加载'} · ${logger.cyan(rel)}`,
-          'Plugin',
-        )
-        if (loaded) await this.changePlugin(key)
-        else await this.loadKey(key)
-      }, 2000)
+      if (action === 'unlink') {
+        if (!this.isLoaded(key)) return
+        util.makeLog('mark', `插件已删除 → 卸载 · ${logger.cyan(rel)}`, 'Plugin')
+        await this.unloadPlugin(key)
+        return
+      }
+
+      const loaded = this.isLoaded(key)
+      util.makeLog(
+        'mark',
+        `插件${action === 'add' ? '新增' : '修改'} → ${loaded ? '重载' : '加载'} · ${logger.cyan(rel)}`,
+        'Plugin',
+      )
+      if (loaded) await this.changePlugin(key)
+      else await this.loadKey(key)
+    }
+
+    const flushEvents = async () => {
+      flushTimer = undefined
+      const batch = [...pendingEvents.entries()]
+      pendingEvents.clear()
+      /** 同一插件的多个文件（新建整个目录、批量保存）只处理一次 */
+      const handled = new Set<string>()
+      for (const [file, action] of batch) {
+        const key = this.keyOf(relOf(file))
+        if (key && handled.has(key)) continue
+        if (key) handled.add(key)
+        try {
+          await processEvent(file, action)
+        } catch (err) {
+          util.makeLog('error', `热重载处理失败 ${logger.cyan(relOf(file))}：${String((err as any)?.message || err)}`, 'Plugin')
+          util.makeLog('debug', [`${relOf(file)} 热重载失败详情`, err], 'Plugin')
+        }
+      }
+    }
+
+    const handle = (action: 'add' | 'change' | 'unlink') => (file: string) => {
+      pendingEvents.set(file, action)
+      if (flushTimer) clearTimeout(flushTimer)
+      flushTimer = setTimeout(() => void flushEvents(), 2000)
+      /** 不拖住退出 */
+      flushTimer.unref?.()
+    }
+
+    /** chokidar 初次扫描是否完成（边扫描边铺监听，扫描期间的深层事件会丢） */
+    let scanReady = false
+    watcher.once('ready', () => {
+      scanReady = true
+    })
 
     Bot.once('online', () => {
       watcher.on('add', handle('add'))
@@ -1249,7 +1355,16 @@ class PluginsLoader {
           util.makeLog('debug', `检测到新插件目录 · ${rel}（放入 .js 文件后自动加载）`, 'Plugin')
         }, 2000) as any,
       )
-      util.makeLog('info', '热重载已开启（plugins/ 下新增 / 修改 / 删除 js 即时生效）', 'Plugin')
+      /**
+       * 「热重载已开启」这句要在**初次扫描完成之后**才打：chokidar 是边扫描边铺监听的，
+       * 真实 plugins/ 目录上千个文件、Windows 上要十几秒，扫描期间改深层文件（如插件的
+       * apps/x.js）事件根本不会产生。原来在线时就报「已开启」，用户照着改文件却毫无反应，
+       * 只能怀疑框架坏了。现在等 chokidar 的 ready。
+       */
+      const announce = () =>
+        util.makeLog('info', '热重载已开启（plugins/ 下新增 / 修改 / 删除 js 即时生效）', 'Plugin')
+      if (scanReady) announce()
+      else watcher.once('ready', announce)
     })
     this.watcher['#root'] = watcher
   }

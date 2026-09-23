@@ -190,6 +190,9 @@ export default class RoutePlugin extends JiuLiPlugin {
 
   await sleep(4000)
   check('插件注册的 express 路由已生效', countRoute() === 1, `路由层数 ${countRoute()}`)
+  /** 并行导入时「当前加载的插件」必须是它自己：记到别人名下会导致重载时清不掉旧路由 */
+  const ownLayers = globalThis.Bot.pluginLayers?.get('hotreload-route')?.size ?? 0
+  check('路由归属到插件自己名下', ownLayers >= 1, `pluginLayers[hotreload-route]=${ownLayers}`)
 
   sent.length = 0
   emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#重载 hotreload-route' })
@@ -203,6 +206,137 @@ export default class RoutePlugin extends JiuLiPlugin {
 
   fs.rmSync(dir, { recursive: true, force: true })
   await sleep(3500)
+}
+
+/**
+ * 7. 目录型插件（index.js + lib/ + apps/）：改**嵌套模块**也要真的生效
+ *
+ * 回归的是「日志写着重载、跑的却还是旧代码」：原来的重载只给入口（index.js?时间戳）
+ * 换 URL，入口里 `import './lib/inner.js'` 解析出的 URL 不带时间戳，命中 Node 的 ESM
+ * 模块缓存 —— lib/ 里的新代码根本不会被求值，用户必须重启。
+ * 这里只改 lib/inner.js、入口一个字不动，断言输出跟着变。
+ */
+{
+  const dir = path.join(PLUGINS_DIR, 'hotreload-nested')
+  fs.rmSync(dir, { recursive: true, force: true })
+  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true })
+  const indexPath = path.join(dir, 'index.js')
+  const innerPath = path.join(dir, 'lib', 'inner.js')
+  fs.writeFileSync(
+    indexPath,
+    [
+      "import { label } from './lib/inner.js'",
+      "import { JiuLiPlugin } from 'jiuli'",
+      '',
+      'export default class NestedPlugin extends JiuLiPlugin {',
+      '  constructor() {',
+      "    super({ name: '嵌套模块测试', dsc: 'test', event: 'message', priority: -Infinity, rule: [{ reg: '^#嵌套测试$', fnc: 'hi' }] })",
+      '  }',
+      '  async hi() {',
+      "    return this.reply('嵌套 ' + label())",
+      '  }',
+      '}',
+      '',
+    ].join('\n'),
+  )
+  const innerSource = v => `export function label() {\n  return '${v}'\n}\n`
+  fs.writeFileSync(innerPath, innerSource('v1'))
+
+  const ask = async () => {
+    sent.length = 0
+    emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#嵌套测试' })
+    await sleep(500)
+    return json()
+  }
+
+  await sleep(4000)
+  check('目录型插件加载', (await ask()).includes('嵌套 v1'), json().slice(0, 50))
+
+  fs.writeFileSync(innerPath, innerSource('v2'))
+  await sleep(4500)
+  check('改 lib/ 里的嵌套模块 → 重载后真的生效', (await ask()).includes('嵌套 v2'), json().slice(0, 60))
+
+  /** 入口自己改了同样要生效（这条在修复前就是通的，防止改坏） */
+  fs.writeFileSync(indexPath, fs.readFileSync(indexPath, 'utf8').replace('嵌套 ', '入口也改了 '))
+  await sleep(4500)
+  check('改入口 index.js → 同样生效', (await ask()).includes('入口也改了 v2'), json().slice(0, 60))
+
+  fs.rmSync(dir, { recursive: true, force: true })
+  await sleep(3500)
+}
+
+/**
+ * 8. 重载不能让插件在同优先级里「掉队」
+ *
+ * 回归的是「重载 miao-plugin 之后 #更新面板 被系统更新插件顶掉」：派发按 priority 升序、
+ * 同优先级按加载顺序先匹配先赢，而重载是「删掉条目再 push 到末尾」—— 重载过的插件于是
+ * 掉到同优先级队伍最后，指令归属就变了（生态插件大量用 -Infinity，互相重叠很常见）。
+ */
+{
+  const mk = (key, tag) => {
+    const dir = path.join(PLUGINS_DIR, key)
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'index.js'),
+      [
+        "import { JiuLiPlugin } from 'jiuli'",
+        '',
+        `export default class Prio${tag} extends JiuLiPlugin {`,
+        '  constructor() {',
+        `    super({ name: '抢指令${tag}', dsc: 'test', event: 'message', priority: -Infinity, rule: [{ reg: '^#抢指令$', fnc: 'hi' }] })`,
+        '  }',
+        '  async hi() {',
+        `    return this.reply('来自 ${tag}')`,
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+    )
+  }
+  mk('hotreload-prio-a', 'A')
+  mk('hotreload-prio-b', 'B')
+  await sleep(4500)
+
+  const ask = async () => {
+    sent.length = 0
+    emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#抢指令' })
+    await sleep(500)
+    return json()
+  }
+  const first = await ask()
+  const winner = first.includes('来自 A') ? 'hotreload-prio-a' : first.includes('来自 B') ? 'hotreload-prio-b' : ''
+  check('两个同优先级插件都加载并抢同一条指令', Boolean(winner), first.slice(0, 60))
+  /** 失败时把同优先级那一段的真实顺序打出来 */
+  const orderGroup = () =>
+    loader.priority
+      .filter(i => i.priority === -Infinity)
+      .map(i => `${i.key}#${i.order}`)
+      .join(' | ')
+
+  if (winner) {
+    const tag = winner.endsWith('-a') ? 'A' : 'B'
+    const loserTag = tag === 'A' ? 'B' : 'A'
+    const orderOf = key => loader.priority.find(i => i.key === key)?.order
+    const orderBefore = orderOf(winner)
+
+    /** 改内容（顺带验证重载真的换了代码）+ 重载：胜者必须还是它 */
+    const winnerFile = path.join(PLUGINS_DIR, winner, 'index.js')
+    fs.writeFileSync(winnerFile, fs.readFileSync(winnerFile, 'utf8').replace(`来自 ${tag}`, `来自 ${tag}改`))
+    await sleep(4500)
+    const after = await ask()
+    check('重载后新代码生效', after.includes(`来自 ${tag}改`), after.slice(0, 60))
+    check(
+      `重载后仍是原来那个赢（${tag}，不是 ${loserTag}）`,
+      !after.includes(`来自 ${loserTag}`),
+      `${after.slice(0, 40)} ｜ 同优先级顺序：${orderGroup()}`,
+    )
+    check('重载前后 order 号不变', orderOf(winner) === orderBefore, `${orderBefore} → ${orderOf(winner)}`)
+  }
+
+  fs.rmSync(path.join(PLUGINS_DIR, 'hotreload-prio-a'), { recursive: true, force: true })
+  fs.rmSync(path.join(PLUGINS_DIR, 'hotreload-prio-b'), { recursive: true, force: true })
+  await sleep(3000)
 }
 
 /* 汇总 */

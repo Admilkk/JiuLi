@@ -168,7 +168,12 @@ class Util {
     const root = `${process.cwd().replace(/\\/g, '/')}/`
     const frames: string[] = []
     for (const line of stack.split('\n')) {
-      const m = line.match(/\(?((?:file:\/\/)?[^()\s]+\.(?:js|mjs|cjs|ts)):(\d+):(\d+)\)?/)
+      /**
+       * 模块 URL 上可能带查询串（插件热重载会给 plugins/ 下的模块加 `?jiuli_reload=N`），
+       * 所以 `.js` 与 `:行:列` 之间要允许一段 `?xxx`；不给这个口子整条帧都匹配不上，
+       * 报错里就只剩原因、没有位置了。
+       */
+      const m = line.match(/\(?((?:file:\/\/)?[^()\s]+?\.(?:js|mjs|cjs|ts))(?:\?[^()\s]*)?:(\d+):(\d+)\)?/)
       if (!m) continue
       /** Node 的堆栈会把中文/空格路径 percent-encode，先还原再展示 */
       let file = m[1].replace(/^file:\/\//, '')

@@ -13,6 +13,7 @@ import { ulid } from 'ulid'
 import cfg from './config/index.js'
 import util from './util.js'
 import { logger } from './log.js'
+import { currentLoadingKey } from './loading.js'
 import type { JiuLiEvent } from './types.js'
 
 export default class JiuLiBot extends EventEmitter {
@@ -171,9 +172,13 @@ export default class JiuLiBot extends EventEmitter {
   private pluginLayers = new Map<string, Set<any>>()
   private pluginWs = new Map<string, Set<string>>()
 
-  /** 当前正在加载的插件 key（由 loader 在 import 前后设置） */
+  /**
+   * 当前正在加载的插件 key（由 loader 在 import 前后设置）。
+   * 读的是 AsyncLocalStorage 里的上下文，不是全局变量 —— 插件并行导入时全局量会被
+   * 别的插件改掉，导致路由被记到别人名下（见 lib/core/loading.ts 的说明）。
+   */
   private get loadingKey(): string | undefined {
-    return (globalThis as any).__jiuliLoading
+    return currentLoadingKey()
   }
 
   /** 包装 express 路由方法，记录每个插件注册的层；重载时先清理旧层，避免路由重复注册 */

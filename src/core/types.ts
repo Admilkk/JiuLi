@@ -147,6 +147,12 @@ export interface PluginEntry {
   name: string
   priority: number
   namespace: string
+  /**
+   * 首次加载的顺序号（重载后不变）。
+   * priority 相同时按它排序，保证重载过的插件不会掉到同优先级队伍的最后、
+   * 从而改变指令归属（见 loader 的 sortPriority）。
+   */
+  order?: number
   /** 事件索引桶 */
   events?: string[]
 }

@@ -22,6 +22,8 @@ lib/**  兼容层（手写 JS shim）
 lib/core/**  内核（由 src/** 编译）
    bot.ts          Bot 单例（Proxy / uin / adapter / HTTP / WS / 文件）
    loader.ts       插件加载 + 消息分发 + 任务 + 热重载
+   loading.ts      「当前正在加载哪个插件」的异步上下文（路由归属用）
+   reload-hooks.ts 模块解析钩子：给 plugins/ 下的模块打代数戳，实现整图热重载
    plugin.ts       插件基类（rule / 上下文 / renderImg）
    config/         配置中心（YAML + Proxy 回落 + 热更新）
    redis.ts        Redis + 内存降级
@@ -90,6 +92,36 @@ app.js（模式：internal / external / pm2 / daemon / stop）
 3. V8 编译缓存（`NODE_COMPILE_CACHE`）实测无收益（24.9s → 28.0s），瓶颈不在解析 / 编译。
 4. 进一步提速只能改**惰性加载**（静态提取规则正则，命中才 import），
    与运行时改规则的插件存在兼容风险，暂未实现。
+
+## 插件热重载
+
+`plugins/` 下的 js 变更（2 秒窗口合并后）走 `changePlugin`：卸载旧插件 → 重新 `import` 入口 →
+重建事件索引与定时任务。三处细节都不显眼，但少了任何一处都会出现「日志说重载了、行为却没变」：
+
+1. **入口带时间戳不足以保证新代码生效**。原来只给入口加 `?<时间戳>`，而入口里
+   `import './apps/x.js'` / `import './lib/y.js'` 这类嵌套说明符解析出的 URL 不带时间戳，
+   命中 Node 的 ESM 缓存 —— 目录型插件（index.js + apps/ + lib/）改完还是跑旧模块，
+   必须重启。现在由 `reload-hooks.ts` 注册同步解析钩子（`module.registerHooks`，Node 22.15+），
+   给 `plugins/` 下的模块 URL 统一追加 `?jiuli_reload=<代数>`，每次重载代数 +1，
+   **整张插件模块图**重新求值；框架自身、根 `node_modules`、插件自带的 `node_modules` 不加戳，
+   避免把共享依赖也复制一份。Node 偏老（无该钩子）时退回旧行为并在启动日志里说明。
+2. **重载不能改变插件在同优先级里的次序**。分发按 priority 升序、同优先级按加载顺序先匹配
+   先赢，而重载是「删掉条目再 push 到末尾」：重载过的插件会掉到同优先级队伍最后，指令归属
+   随之改变（重载 miao-plugin 后 `#更新面板` 被 system/update.js 的 `^#更新` 顶掉就是这个
+   原因，两者 priority 都是 `-Infinity`）。现在每条插件条目带一个首次加载时分配的 `order`，
+   `sortPriority()` 用 `priority || order` 排序，重载前后完全一致。
+3. **监听事件按批处理**。原来每种事件各自走 `util.debounce`，而 debounce 在一个窗口内只保留
+   最后一次调用 —— 快速连改多个文件（IDE 全部保存、批量改、一次新建整个插件目录）只有最后
+   一个会触发。现在窗口内的事件收进待处理表、到点整批处理，同一个插件的多个文件只处理一次。
+
+另外两处与热重载配套：
+
+- **路由归属**：Bot 登记插件注册的 express 路由 / WS 路径时，读的是 `loading.ts` 里的
+  AsyncLocalStorage（不是全局变量）。插件是并行导入的，全局量会被别的插件改掉，路由就会记到
+  别人名下 —— 重载自己时清不掉（路由翻倍、限流闸门跑两遍），重载别人时反而把自己的路由删掉。
+- **模块级副作用**：整图重新求值意味着插件在 import 阶段建的定时器 / 监听 / 连接会各多一份。
+  类形态的实例资源用 `onUnload()` 清理（卸载前会调用）；模块级的（顶层建的）只能在入口里
+  自己交接 —— 见 [插件开发](plugin-guide.md#热重载与模块级资源)。
 
 ## 消息分发
 
