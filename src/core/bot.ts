@@ -90,6 +90,8 @@ export default class JiuLiBot extends EventEmitter {
     super()
     /** 记录插件注册的 express 路由与 WS 路径，卸载/重载时清理（避免重复注册与端口/处理器冲突） */
     this.wrapExpress()
+    /** 同理记录插件在加载期挂的事件监听：每热重载一次多留一份会让消息被处理 N 次 */
+    this.wrapEventMethods()
     /** 属性回落解析缓存（函数绑定等） */
     const cache = new Map<string | symbol, any>()
     const resolve = (prop: string | symbol) => {
@@ -171,6 +173,8 @@ export default class JiuLiBot extends EventEmitter {
 
   private pluginLayers = new Map<string, Set<any>>()
   private pluginWs = new Map<string, Set<string>>()
+  /** 插件在加载期挂的事件监听：key → [{ event, listener }] */
+  private pluginListeners = new Map<string, Array<{ event: string | symbol; listener: (...args: any[]) => any }>>()
 
   /**
    * 当前正在加载的插件 key（由 loader 在 import 前后设置）。
@@ -225,6 +229,32 @@ export default class JiuLiBot extends EventEmitter {
     })
   }
 
+  /**
+   * 包装事件订阅方法，记录「哪个插件在加载期挂了哪些监听」，卸载 / 重载时移除。
+   *
+   * express 路由与 WS 路径一直是这么管的，事件监听漏了：插件在**模块顶层** `Bot.on(...)` 是
+   * 生态插件很常见的写法（xiaofei 的 `guild.message`、yenai 的 `message.group` 点赞），
+   * 而热重载会重新求值整张模块图 —— 旧那份监听留在 EventEmitter 上，每重载一次多一份，
+   * 一条消息被处理 N 次（实测重载三次：监听数 2→5，一条消息命中 4 次）。
+   *
+   * 只记录**加载上下文里**的调用：插件在运行期（指令、定时任务里）动态挂的监听不算「插件资源」，
+   * 不参与清理，免得把用户运行时才建的东西删掉。
+   */
+  private wrapEventMethods() {
+    for (const method of ['on', 'once', 'addListener', 'prependListener', 'prependOnceListener'] as const) {
+      const orig = (this as any)[method].bind(this)
+      ;(this as any)[method] = (event: string | symbol, listener: any) => {
+        const key = this.loadingKey
+        if (key && typeof listener === 'function') {
+          const list = this.pluginListeners.get(key)
+          if (list) list.push({ event, listener })
+          else this.pluginListeners.set(key, [{ event, listener }])
+        }
+        return orig(event, listener)
+      }
+    }
+  }
+
   /** 插件卸载/重载前清理它注册的路由与 WS 路径 */
   cleanupPluginResources(key: string) {
     const router = this.express?.router || this.express?._router
@@ -252,9 +282,26 @@ export default class JiuLiBot extends EventEmitter {
       this.pluginWs.delete(key)
     }
 
-    if (routes || ws)
-      util.makeLog('debug', `已清理插件注册的 express 路由 ${routes} 条 · WS 路径 ${ws} 个 · ${key}`, 'Plugin')
-    return { routes, ws }
+    /** 加载期挂的事件监听（节点式 `Bot.on(...)` 写法） */
+    let listeners = 0
+    const records = this.pluginListeners.get(key)
+    if (records) {
+      for (const { event, listener } of records) {
+        try {
+          this.off(event as any, listener as any)
+          listeners++
+        } catch {}
+      }
+      this.pluginListeners.delete(key)
+    }
+
+    if (routes || ws || listeners)
+      util.makeLog(
+        'debug',
+        `已清理插件注册的 express 路由 ${routes} 条 · WS 路径 ${ws} 个 · 事件监听 ${listeners} 个 · ${key}`,
+        'Plugin',
+      )
+    return { routes, ws, listeners }
   }
 
   /* ==================== HTTP 服务 ==================== */

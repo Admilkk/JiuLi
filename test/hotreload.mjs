@@ -339,6 +339,72 @@ export default class RoutePlugin extends JiuLiPlugin {
   await sleep(3000)
 }
 
+/**
+ * 9. 加载期挂的 Bot 监听要在重载时清掉
+ *
+ * 回归的是「每重载一次多留一份监听」：插件在**模块顶层** `Bot.on(...)` 时（生态插件常见写法，
+ * 如 xiaofei 的 guild.message、yenai 的 message.group 点赞），旧那份监听留在 EventEmitter 上，
+ * 一条消息被处理 N 次。运行期（指令里）动态挂的监听不算插件资源，重载后应当保留。
+ */
+{
+  const dir = path.join(PLUGINS_DIR, 'hotreload-listener')
+  fs.rmSync(dir, { recursive: true, force: true })
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'index.js'),
+    [
+      "import { JiuLiPlugin } from 'jiuli'",
+      '',
+      'globalThis.__fixtureHits = 0',
+      'globalThis.__runtimeHits = 0',
+      "Bot.on('message', () => { globalThis.__fixtureHits++ })",
+      '',
+      'export default class ListenerFixture extends JiuLiPlugin {',
+      '  constructor() {',
+      "    super({ name: '监听夹具', dsc: 'test', event: 'message', priority: -Infinity, rule: [",
+      "      { reg: '^#夹具挂监听$', fnc: 'addRuntime' },",
+      "      { reg: '^#夹具$', fnc: 'hi' },",
+      '    ] })',
+      '  }',
+      '  async addRuntime() {',
+      "    Bot.on('message.group', () => { globalThis.__runtimeHits++ })",
+      "    return this.reply('已挂运行期监听')",
+      '  }',
+      '  async hi() {',
+      "    return this.reply('夹具 OK')",
+      '  }',
+      '}',
+      '',
+    ].join('\n'),
+  )
+  await sleep(4500)
+
+  const count = event => globalThis.Bot.listenerCount(event)
+  const before = { message: count('message'), group: count('message.group') }
+  check('加载期监听已挂上', before.message > 0, `message=${before.message}`)
+
+  sent.length = 0
+  emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#夹具挂监听' })
+  await sleep(600)
+  check('指令里动态挂的监听生效', count('message.group') === before.group + 1, `message.group=${count('message.group')}`)
+
+  for (let i = 0; i < 2; i++) {
+    await loader.changePlugin('hotreload-listener')
+    await sleep(400)
+  }
+  check('重载不会累积加载期监听', count('message') === before.message, `message ${before.message} → ${count('message')}`)
+  check('运行期挂的监听不被误删', count('message.group') === before.group + 1, `message.group=${count('message.group')}`)
+
+  globalThis.__fixtureHits = 0
+  sent.length = 0
+  emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '随便一句' })
+  await sleep(600)
+  check('一条消息只触发一次加载期监听', globalThis.__fixtureHits === 1, `命中 ${globalThis.__fixtureHits} 次`)
+
+  fs.rmSync(dir, { recursive: true, force: true })
+  await sleep(3000)
+}
+
 /* 汇总 */
 fs.rmSync(DIR, { recursive: true, force: true })
 const pass = results.filter(r => r.ok).length
