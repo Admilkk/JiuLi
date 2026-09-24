@@ -3,6 +3,7 @@
 兼容 TRSS-Yunzai 生态的机器人框架，内核 TypeScript。
 
 - **旧插件零改动**：云崽插件放进 `plugins/` 即可用，物理路径、全局变量、`e` 对象契约全部保留
+- **能吃别家插件**：Koishi / GsCore（早苗）/ AstrBot 的插件也能接进来（见[生态兼容](#生态兼容)）
 - **内核 TS**：`src/` 编译到 `lib/core/`，可 `pnpm typecheck`
 - **轻量**：不带业务，开箱功能只有状态 / 帮助 / 主人 / 词条 / 重启这些基础件
 - **可换适配器**：协议端通过适配器插件接入（`Bot.adapter.push`）
@@ -95,6 +96,33 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 
 `#重载` 只用于自动机制覆盖不到的情况：`#重载` 补漏加载磁盘上还没加载的插件，`#重载 关键词` 强制刷新匹配的插件。
 
+## 生态兼容
+
+除了云崽插件，JiuLi 还能加载 **Koishi / GsCore（早苗、gsuid_core）/ AstrBot** 的插件。
+默认关闭，在 `config/config/compat.yaml` 里打开：
+
+```yaml
+enabled: true
+ecosystems:
+  koishi:  { enabled: true }   # Node 生态：进程内直接用官方 koishi 包跑真实 npm 插件
+  gscore:  { enabled: true }   # Python 生态：Python 边车 + gsuid_core 仿制包
+  astrbot: { enabled: true }   # Python 生态：Python 边车 + astrbot 仿制包
+```
+
+插件放 `plugins/compat/pkgs/<生态>/`，Koishi 也可以 `cd plugins/compat && pnpm add koishi-plugin-xxx`。
+外来插件回了消息之后，同一条消息不再走云崽插件（`intercept: false` 可两边都跑）。
+
+三家都各有一个**真实上游插件零改动**跑通的回归样本：AstrBot 官方模板 `Soulter/helloworld`、
+GsCore 官方回归插件 `gsuid_core/buildin_plugins/gs_test.py`、npm 社区包 `koishi-plugin-markdown`。
+
+可行性、覆盖范围、明确跑不了什么的完整说明见
+[docs/compat-ecosystems.md](docs/compat-ecosystems.md)（含三家插件的机制调研报告，见 `docs/research/`）。
+
+```bash
+pnpm test:compat              # 三个生态各自的链路测试
+pnpm test:compat:integration  # 真实内核集成（loader.deal → 兼容层 → 外来插件 → 适配器）
+```
+
 ## 服务器上常驻运行
 
 想在服务器上同时保住「进程常驻」「实时日志」「终端敲 `#重启`」，用一条命令进 tmux 会话：
@@ -158,12 +186,15 @@ jiuli/
 ├─ jiuli.mjs           CLI
 ├─ src/                内核 TS 源码（编译到 lib/core/）
 ├─ lib/                运行时：编译产物 + 手写兼容层 shim
+│  └─ compat/          生态兼容层（Koishi / GsCore / AstrBot 宿主与仿制包）
 ├─ renderers/puppeteer 渲染后端
 ├─ plugins/            插件目录
+│  └─ compat/          兼容层入口 + 外来插件安装位置（pkgs/<生态>/）
 ├─ config/
 │  ├─ default_config/  默认配置（随仓库）
 │  └─ config/          用户配置（首次启动生成，不入库）
 ├─ templates/          插件骨架模板
+├─ docs/research/      三家插件体系的 API 面调研报告
 └─ test/               测试脚本
 ```
 

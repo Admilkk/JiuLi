@@ -1,0 +1,43 @@
+# ===== 生态兼容（v2）=====
+#
+# 让 JiuLi 除了云崽插件，还能加载其它机器人生态的插件：
+#   koishi  —— Node 生态，直接依赖官方 koishi 包在进程内运行（保真度最高）
+#   gscore  —— Python 生态（早苗 / Sayu-Bot / GenshinUID 的 gsuid_core），走 Python 边车进程
+#   astrbot —— Python 生态（AstrBot 的 Star 插件），走 Python 边车进程
+#
+# 插件放哪：
+#   Koishi  ：plugins/compat/pkgs/koishi/<npm 包名>/  （或 cd plugins/compat && pnpm add koishi-plugin-xxx）
+#   GsCore  ：plugins/compat/pkgs/gscore/<插件目录>/
+#   AstrBot ：plugins/compat/pkgs/astrbot/<插件目录>/
+
+# 总开关；关掉时不会加载任何外来插件，也不影响 JiuLi 自身
+enabled: false
+
+# 外来插件处理一条消息的最长时间(ms)。超时会把这条消息交回 JiuLi，
+# 避免外来插件卡在 await 上把整个分发挂死
+timeout_ms: 15000
+
+# 外来插件「已处理」时是否拦截 JiuLi 自身的规则匹配
+#   true ：外来插件命中后不再走云崽插件（避免两边同时回复同一条指令）
+#   false：两边都跑（迁移期对比行为时有用）
+intercept: true
+
+ecosystems:
+  koishi:
+    enabled: false
+    # 需要额外加载的 koishi 插件包名（不写则扫描 plugins/compat/pkgs/koishi/ 下的目录）
+    plugins: []
+    # 传给每个插件的配置：{ "插件包名": { ... } }
+    config: {}
+
+  gscore:
+    enabled: false
+    # Python 解释器；留空自动探测 python3 / python / py -3
+    python: ''
+    # 传给插件的环境变量（部分插件要 GS_TOKEN 之类）
+    env: {}
+
+  astrbot:
+    enabled: false
+    python: ''
+    env: {}

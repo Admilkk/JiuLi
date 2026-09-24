@@ -1,0 +1,15 @@
+{
+  "name": "jiuli-compat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "JiuLi 生态兼容宿主：Koishi 桥接依赖与外来插件的安装位置",
+  "scripts": {
+    "add-koishi": "pnpm add koishi",
+    "add-plugin": "pnpm add"
+  },
+  "dependencies": {
+    "koishi": "^4.18.11",
+    "koishi-plugin-markdown": "^1.1.1"
+  }
+}

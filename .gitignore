@@ -25,6 +25,10 @@ temp/
 !/plugins/adapter
 !/plugins/demo
 !/plugins/example
+# 生态兼容层要入库（宿主代码 + 回归测试用的真实插件样本）；
+# 用户 pnpm add 装进 plugins/compat/node_modules 的不入库
+!/plugins/compat
+plugins/compat/node_modules/
 # 自行加入的第三方插件文件（如从云崽插件目录拷来的单个 js）默认不入库；
 # 想让它进仓库，把下面这行删掉即可
 plugins/example/qqbot图床.js
@@ -42,6 +46,10 @@ plugins/_test-fixtures/
 .vscode/
 *.log
 test/.commit-msg
+
+# Python 兼容层（lib/compat/py）运行产生的字节码
+__pycache__/
+*.pyc
 
 # 测试/调试临时产物
 test/.tmp-*

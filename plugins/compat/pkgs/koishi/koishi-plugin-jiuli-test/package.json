@@ -1,0 +1,7 @@
+{
+  "name": "koishi-plugin-jiuli-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JiuLi Koishi 兼容层自测插件（不是真实生态插件，用于验证桥接链路）",
+  "main": "index.js"
+}

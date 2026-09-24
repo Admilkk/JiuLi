@@ -1,0 +1,5 @@
+name: astrbot_plugin_jiuli_test
+desc: JiuLi AstrBot 兼容层自测插件（不是真实生态插件，用于验证桥接链路）
+version: 1.0.0
+author: jiuli
+repo: https://example.com/astrbot_plugin_jiuli_test

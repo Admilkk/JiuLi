@@ -116,7 +116,11 @@ class PluginsLoader {
     const files = await fs.readdir(this.dir, { withFileTypes: true }).catch(() => [] as any[])
     const ret: Array<{ name: string; path: string }> = []
     for (const val of files) {
-      if (!val.isDirectory() || this.aliasDirs.has(val.name)) continue
+      /**
+       * 符号链接 / junction 也算插件目录：Docker 挂载、多实例共享插件、测试隔离都用这招，
+       * 而 Node 的 Dirent 对软链接报告 isSymbolicLink() 而不是 isDirectory()，只判后者会静默漏掉整个目录。
+       */
+      if ((!val.isDirectory() && !val.isSymbolicLink()) || this.aliasDirs.has(val.name)) continue
       const tmp = { name: val.name, path: `../../${this.dir}/${val.name}` }
 
       if (await util.fsStat(`${this.dir}/${val.name}/index.js`)) {
@@ -742,7 +746,13 @@ class PluginsLoader {
    * 类形态定义同名方法即可；DSL 形态的 beforeMessage(fn) / afterMessage(fn) 会绑定为同名方法
    */
   private async runHooks(e: JiuLiEvent, entries: PluginEntry[], name: 'beforeMessage' | 'afterMessage') {
-    for (const entry of entries) {
+    /**
+     * 钩子按 priority 排序后执行。事件索引是按**加载顺序**建的（sortPriority 只重排 priority 数组，
+     * 不重建索引），直接遍历会让钩子的先后取决于目录扫描顺序。生态兼容层靠 beforeMessage 拦截分发，
+     * 顺序不稳定就会出现「有时两边都回复、有时都不回复」。
+     */
+    const ordered = [...entries].sort((a, b) => a.priority - b.priority || (a.order ?? 0) - (b.order ?? 0))
+    for (const entry of ordered) {
       const fn = entry.plugin?.[name]
       if (typeof fn !== 'function') continue
       try {
