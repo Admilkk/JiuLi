@@ -1,7 +1,9 @@
 # 生态兼容（plugins/compat）
 
 让 JiuLi 除了云崽插件，还能加载 **Koishi / GsCore（早苗）/ AstrBot** 的插件。
-完整说明（可行性、覆盖范围、缺口）见 [`docs/compat-ecosystems.md`](../../docs/compat-ecosystems.md)。
+怎么开启、怎么装插件、能用哪些功能：见使用手册
+[`docs/compat-ecosystems.md`](../../docs/compat-ecosystems.md)；
+分支定位与整体兼容情况：[`V2.md`](../../V2.md)。
 
 ## 目录
 
@@ -52,15 +54,20 @@ python -m pip install -r pkgs/astrbot/<插件名>/requirements.txt
 
 ## 回归测试用的真实插件样本
 
-`pkgs/` 下有三个**上游原样下载、未改一行**的插件，用于证明"真实生态插件零改动可跑"：
+用来证明"真实生态插件零改动可跑"的四个样本：
 
-| 路径 | 来源 | 许可 |
+| 来源 | 位置 | 说明 |
 |---|---|---|
-| `pkgs/koishi/koishi-plugin-jiuli-test/` | 本仓库自写（模仿真实 koishi-plugin 的 CJS 形状） | AGPL-3.0 |
-| `pkgs/astrbot/helloworld/` | <https://github.com/Soulter/helloworld>（AstrBot 官方模板，v1.3.0） | AGPL-3.0 |
-| `pkgs/gscore/gs_test.py` | `gsuid_core/buildin_plugins/gs_test.py`（GsCore 官方回归插件） | GPL-3.0 |
+| `pkgs/astrbot/helloworld/` | 仓库内 | <https://github.com/Soulter/helloworld>（AstrBot 官方模板 v1.3.0），原样收录 |
+| `pkgs/gscore/gs_test.py` | 仓库内 | `gsuid_core/buildin_plugins/gs_test.py`（GsCore 官方回归插件），原样收录 |
+| `koishi-plugin-markdown` | `package.json` 的依赖 | npm 上的真实社区插件，随 `pnpm install` 装上 |
+| `pkgs/koishi/koishi-plugin-jiuli-test/` | 仓库内 | 本仓库自写（模仿真实 koishi-plugin 的 CJS 形状） |
 
-另外 `pkgs/astrbot/astrbot_plugin_jiuli_test/` 是本仓库自写的 AstrBot 夹具插件（覆盖各种 filter 与消息组件）。
+`pkgs/astrbot/astrbot_plugin_jiuli_test/`、`pkgs/gscore/gs_jiuli_test/` 是本仓库自写的夹具插件，
+分别覆盖 AstrBot 的各种 filter / 消息组件、GsCore 的六种触发器与多步会话。
+
+> `koishi-plugin-markdown` 只是为了回归测试才作为依赖带上；开 Koishi 兼容后它会被自动加载，
+> 不需要的话 `cd plugins/compat && pnpm remove koishi-plugin-markdown` 即可（对应测试项会变成跳过）。
 
 ## 已知边界
 

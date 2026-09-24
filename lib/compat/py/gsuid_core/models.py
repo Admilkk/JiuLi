@@ -35,7 +35,7 @@ class Message:
     def __repr__(self):
         return f"Message(type={self.type!r}, data={self.data!r})"
 
-    # ---- 常用构造 ----
+    # 常用构造
 
     @classmethod
     def text(cls, data: Any):

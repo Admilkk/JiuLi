@@ -98,6 +98,10 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 
 ## 生态兼容
 
+> ⚠️ 这个能力在 **`v2` 分支**上，是**探索性实现、暂时算半成品**：三个生态的基础链路跑通了，
+> 但重运行时（PIL 绘图 / 真实数据库 / WebUI / LLM）都没做。分支定位与兼容 / 不兼容清单见
+> [V2.md](V2.md)。
+
 除了云崽插件，JiuLi 还能加载 **Koishi / GsCore（早苗、gsuid_core）/ AstrBot** 的插件。
 默认关闭，在 `config/config/compat.yaml` 里打开：
 
@@ -115,8 +119,8 @@ ecosystems:
 三家都各有一个**真实上游插件零改动**跑通的回归样本：AstrBot 官方模板 `Soulter/helloworld`、
 GsCore 官方回归插件 `gsuid_core/buildin_plugins/gs_test.py`、npm 社区包 `koishi-plugin-markdown`。
 
-可行性、覆盖范围、明确跑不了什么的完整说明见
-[docs/compat-ecosystems.md](docs/compat-ecosystems.md)（含三家插件的机制调研报告，见 `docs/research/`）。
+怎么装插件、能用哪些功能、出问题怎么查，见
+[docs/compat-ecosystems.md](docs/compat-ecosystems.md)（使用手册）。
 
 ```bash
 pnpm test:compat              # 三个生态各自的链路测试
@@ -194,7 +198,6 @@ jiuli/
 │  ├─ default_config/  默认配置（随仓库）
 │  └─ config/          用户配置（首次启动生成，不入库）
 ├─ templates/          插件骨架模板
-├─ docs/research/      三家插件体系的 API 面调研报告
 └─ test/               测试脚本
 ```
 
@@ -240,8 +243,8 @@ Yunzai-QQBot-Plugin、Yunzai-ICQQ-Plugin、hl-icqq-web 均已实机验证。
 node jiuli a <插件仓库地址>     # 或手动复制目录后 pnpm install
 ```
 
-对插件所做的适配（跨插件路径、具名导出、`systeminformation` 惰性化等）逐条记录在
-[docs/ported-plugin-patches.md](docs/ported-plugin-patches.md)，插件更新后照着重新应用。
+对插件所做的适配（跨插件路径、具名导出、`systeminformation` 惰性化等）逐条记录在提交信息里，
+插件更新后照着重新应用。
 
 ## 配置
 

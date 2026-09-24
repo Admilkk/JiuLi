@@ -57,7 +57,7 @@ class Bridge:
         # 出站计数：宿主据此判断「这条消息插件到底回没回」，决定要不要拦截 JiuLi 自身的规则
         self.sent = 0
 
-    # ---------- 发送 ----------
+    # 发送
 
     def _next_id(self):
         with self._lock:
@@ -87,7 +87,7 @@ class Bridge:
             payload["target"] = target
         self.emit(payload)
 
-    # ---------- 接收 ----------
+    # 接收
 
     def on_event(self, fn):
         """注册事件处理器：fn(event_dict, bridge) -> 是否已处理；可以是 async def"""
@@ -97,7 +97,7 @@ class Bridge:
     def current(self, event_id):
         return self._events.get(event_id)
 
-    # ---------- 生命周期 ----------
+    # 生命周期
 
     def run(self):
         """后台线程：阻塞读 stdin，直到 EOF / shutdown"""
@@ -135,7 +135,7 @@ class Bridge:
             await asyncio.sleep(0.2)
         return 0
 
-    # ---------- 分发 ----------
+    # 分发
 
     def _dispatch(self, msg):
         """

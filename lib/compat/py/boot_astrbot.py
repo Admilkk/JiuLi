@@ -52,7 +52,7 @@ WAKE_PREFIX = ["/"]
 PLATFORM_NAME = "aiocqhttp"
 
 
-# ==================== 事件构造 ====================
+# 事件构造
 
 
 def _build_message(raw: dict) -> AstrBotMessage:
@@ -85,7 +85,7 @@ def _strip_wake_prefix(text: str):
     return text, False
 
 
-# ==================== 派发 ====================
+# 派发
 
 
 async def _run_handler(entry, event, bridge) -> bool:
@@ -195,7 +195,7 @@ async def handle_event(raw: dict, bridge) -> bool:
     return handled and (bridge.sent > before or event.is_stopped())
 
 
-# ==================== 启动 ====================
+# 启动
 
 
 async def main():

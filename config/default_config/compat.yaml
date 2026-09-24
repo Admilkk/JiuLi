@@ -1,4 +1,4 @@
-# ===== 生态兼容（v2）=====
+# 生态兼容（v2）
 #
 # 让 JiuLi 除了云崽插件，还能加载其它机器人生态的插件：
 #   koishi  —— Node 生态，直接依赖官方 koishi 包在进程内运行（保真度最高）
@@ -25,7 +25,9 @@ intercept: true
 ecosystems:
   koishi:
     enabled: false
-    # 需要额外加载的 koishi 插件包名（不写则扫描 plugins/compat/pkgs/koishi/ 下的目录）
+    # 要单独传配置的插件写在这里：plugins: ['koishi-plugin-xxx']
+    # 一般不用填：pnpm 装进 plugins/compat/node_modules 的 koishi-plugin-* 会自动加载，
+    # 手动放在 plugins/compat/pkgs/koishi/ 下的目录也会自动扫描
     plugins: []
     # 传给每个插件的配置：{ "插件包名": { ... } }
     config: {}

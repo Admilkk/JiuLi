@@ -27,7 +27,7 @@ from ._message import (
     PlatformMetadata,
 )
 
-# ==================== 注册表 ====================
+# 注册表
 
 
 @dataclass
@@ -54,7 +54,7 @@ star_registry: List[StarMetadata] = []
 star_map: Dict[str, StarMetadata] = {}
 
 
-# ==================== Star ====================
+# Star
 
 
 class _PluginLogger:
@@ -131,7 +131,7 @@ class Star:
     async def terminate(self) -> None:
         return None
 
-    # ---- 常用能力 ----
+    # 常用能力
 
     async def text_to_image(self, text: str, return_url: bool = True) -> str:
         """兼容层没有文转图服务，返回 False 让插件自己降级"""
@@ -186,7 +186,7 @@ def register(name=None, author=None, desc=None, version=None, repo=None):
     return decorator
 
 
-# ==================== StarTools ====================
+# StarTools
 
 
 class StarTools:
@@ -233,7 +233,7 @@ class StarTools:
         return cls.get_data_dir(plugin_name)
 
 
-# ==================== Context ====================
+# Context
 
 
 class _AstrBotConfig(dict):
@@ -265,7 +265,7 @@ class Context:
         self._event_queue = None
         self._web_apis: List[dict] = []
 
-    # ---- 插件/平台 ----
+    # 插件/平台
 
     def get_all_stars(self) -> List[StarMetadata]:
         return list(star_registry)
@@ -285,7 +285,7 @@ class Context:
     def get_event_queue(self):
         return self._event_queue
 
-    # ---- 配置 ----
+    # 配置
 
     def get_config(self, umo: Optional[str] = None) -> _AstrBotConfig:
         return self._config
@@ -293,7 +293,7 @@ class Context:
     def get_db(self):
         raise NotImplementedError("JiuLi 的 AstrBot 兼容层没有数据库服务（插件请用自己目录下的文件存储）")
 
-    # ---- 发送 ----
+    # 发送
 
     async def send_message(self, session, message_chain: MessageChain) -> bool:
         """主动消息：umo → JiuLi 目标"""
@@ -312,7 +312,7 @@ class Context:
         self._bridge.send(elements, target=target)
         return True
 
-    # ---- LLM（兼容层不接模型） ----
+    # LLM（兼容层不接模型）
 
     async def get_current_chat_provider_id(self, umo: str = "") -> str:
         raise NotImplementedError("JiuLi 的 AstrBot 兼容层没有配置 LLM Provider")
@@ -335,7 +335,7 @@ class Context:
     async def tool_loop_agent(self, **kwargs):
         raise NotImplementedError("JiuLi 的 AstrBot 兼容层没有 Agent 执行器")
 
-    # ---- LLM 工具 / Web API ----
+    # LLM 工具 / Web API
 
     def get_llm_tool_manager(self):
         return None
@@ -404,7 +404,7 @@ def _chain_to_elements(chain) -> list:
     return chain_to_elements(chain)
 
 
-# ==================== 加载器 ====================
+# 加载器
 
 
 def _read_metadata(plugin_dir: Path) -> Dict[str, Any]:

@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ._message import MessageType
 
 
-# ==================== 事件类型 ====================
+# 事件类型
 
 
 class EventType(enum.Enum):
@@ -124,7 +124,7 @@ COMMAND_PERMISSION_TYPES = {
 }
 
 
-# ==================== 参数解析辅助 ====================
+# 参数解析辅助
 
 
 class GreedyStr(str):
@@ -297,7 +297,7 @@ class CommandFilter(HandlerFilter):
         return True
 
 
-# ==================== handler 注册表 ====================
+# handler 注册表
 
 
 @dataclass
@@ -370,7 +370,7 @@ def _register(func: Callable, event_type: EventType, filters: List[HandlerFilter
     return func
 
 
-# ==================== 注册器（filter.*） ====================
+# 注册器（filter.*）
 
 
 def command(command_name: Optional[str] = None, sub_command: Optional[str] = None, alias: Optional[set] = None, **kwargs):

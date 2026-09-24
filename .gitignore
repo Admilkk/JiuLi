@@ -51,6 +51,9 @@ test/.commit-msg
 __pycache__/
 *.pyc
 
+# docs 只放讲述框架本身的文档；生态调研报告留在本地参考，不入库
+docs/research/
+
 # 测试/调试临时产物
 test/.tmp-*
 test/tmp-*.mjs

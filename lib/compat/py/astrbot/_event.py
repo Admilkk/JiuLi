@@ -99,7 +99,7 @@ class AstrMessageEvent:
         self._bridge = None
         self._event_id = None
 
-    # ---------- 平台 / 身份 ----------
+    # 平台 / 身份
 
     def get_platform_name(self) -> str:
         return self.platform_meta.name if self.platform_meta else "jiuli"
@@ -141,7 +141,7 @@ class AstrMessageEvent:
     def session_id(self, value: str) -> None:
         self.session.session_id = value
 
-    # ---------- 消息 ----------
+    # 消息
 
     def get_message_str(self) -> str:
         return self.message_str
@@ -181,7 +181,7 @@ class AstrMessageEvent:
         """真实源码就是这一行：只看 role 字符串"""
         return self.role == "admin"
 
-    # ---------- extra ----------
+    # extra
 
     def set_extra(self, key, value) -> None:
         self._extras[key] = value
@@ -194,7 +194,7 @@ class AstrMessageEvent:
     def clear_extra(self) -> None:
         self._extras.clear()
 
-    # ---------- 传播控制 ----------
+    # 传播控制
 
     def set_result(self, result) -> None:
         if isinstance(result, str):
@@ -229,7 +229,7 @@ class AstrMessageEvent:
     def should_call_llm(self, call_llm: bool) -> None:
         self.call_llm = call_llm
 
-    # ---------- 构造结果 ----------
+    # 构造结果
 
     def make_result(self) -> MessageEventResult:
         return MessageEventResult()
@@ -250,7 +250,7 @@ class AstrMessageEvent:
         result.chain = chain
         return result
 
-    # ---------- 直接发送 ----------
+    # 直接发送
 
     async def send(self, message: MessageChain) -> None:
         if self._bridge is None:
@@ -275,7 +275,7 @@ class AstrMessageEvent:
     async def process_buffer(self, buffer: str, pattern: re.Pattern) -> str:
         return buffer
 
-    # ---------- LLM（兼容层不接模型，给占位） ----------
+    # LLM（兼容层不接模型，给占位）
 
     def request_llm(self, prompt: str = "", func_tool_manager=None, tool_set=None, session_id: str = "",
                     image_urls=None, audio_urls=None, contexts=None, system_prompt: str = "", conversation=None):
@@ -286,7 +286,7 @@ class AstrMessageEvent:
         req.session_id = session_id
         return req
 
-    # ---------- 群信息 / 临时文件 ----------
+    # 群信息 / 临时文件
 
     async def get_group(self, group_id: Optional[str] = None, **kwargs) -> Optional[Group]:
         return self.message_obj.group
@@ -319,7 +319,7 @@ class QQOfficialMessageEvent(AstrMessageEvent):
     pass
 
 
-# ==================== 组件 ↔ 通用元素 ====================
+# 组件 ↔ 通用元素
 
 
 def chain_to_elements(chain: Any) -> List[dict]:

@@ -34,7 +34,7 @@ from gsuid_core.sv import SL, SV, _PREFIXLESS_TYPES  # noqa: E402
 PLUGIN_DIR = Path(os.environ.get("JIULI_PLUGIN_DIR", "plugins/compat/pkgs/gscore"))
 
 
-# ==================== 插件加载 ====================
+# 插件加载
 
 
 def iter_plugin_modules():
@@ -106,7 +106,7 @@ def _expand_prefixes(bridge):
         bridge.log("debug", f"插件 {plugins.name} 前缀展开完成")
 
 
-# ==================== 事件派发 ====================
+# 事件派发
 
 
 def _event_of(raw: dict) -> Event:
@@ -198,7 +198,7 @@ async def handle_event(raw: dict, bridge) -> bool:
     return bridge.sent > before or blocked
 
 
-# ==================== 启动 ====================
+# 启动
 
 
 async def main():

@@ -124,7 +124,7 @@ class Trigger:
 
         return inspect.iscoroutinefunction(self.func)
 
-    # ---------- 判定 ----------
+    # 判定
 
     def check_command(self, ev) -> bool:
         text = ev.raw_text or ""
@@ -310,7 +310,7 @@ class SV(Service):
         SV.registry.append(self)
         SL.register(self)
 
-    # ---- 开关（SL.lst[name].disable() 那类用法）----
+    # 开关（SL.lst[name].disable() 那类用法）
 
     def disable(self):
         self.available = False
@@ -325,7 +325,7 @@ class SV(Service):
     def set(self, is_lazy: bool = True, **kwargs):
         return self
 
-    # ---- 触发器注册 ----
+    # 触发器注册
 
     def _on(
         self,

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 
-# ==================== 消息类型 ====================
+# 消息类型
 
 
 class MessageType(enum.Enum):
@@ -28,7 +28,7 @@ class MessageType(enum.Enum):
     OTHER_MESSAGE = "OtherMessage"
 
 
-# ==================== 组件 ====================
+# 组件
 
 
 class BaseMessageComponent:
@@ -380,7 +380,7 @@ async def _to_dict_deep(component: Any) -> Any:
     return component
 
 
-# ==================== 消息链 / 结果 ====================
+# 消息链 / 结果
 
 
 @dataclass
@@ -494,7 +494,7 @@ class MessageEventResult(MessageChain):
 CommandResult = MessageEventResult
 
 
-# ==================== 消息对象 / 会话 ====================
+# 消息对象 / 会话
 
 
 @dataclass

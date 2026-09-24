@@ -7,6 +7,7 @@
  * 跑：node test/compat-koishi.mjs
  */
 import assert from 'node:assert'
+import fs from 'node:fs'
 import path from 'node:path'
 import { jiuLiToUniversal, toSegments } from '../lib/compat/bridge.js'
 
@@ -33,10 +34,10 @@ async function main() {
     id: 'koishi',
     /**
      * FIXTURE：本地夹具，覆盖 command / on('message') / middleware 三种写法
-     * koishi-plugin-markdown：**从 npm 装的真实社区插件**，验证「真实 koishi-plugin-* 包
-     *   能被解析、加载、注册」这条最容易出问题的路径（default 解包、CJS/ESM、服务缺失）
+     * 不显式列 koishi-plugin-markdown —— 它由宿主自动扫描 node_modules 加载，
+     * 这条正是要验证的路径（"pnpm add 装了就生效，不用改配置"）
      */
-    config: { plugins: [FIXTURE, 'koishi-plugin-markdown'], http: false, settle_ms: 400 },
+    config: { plugins: [FIXTURE], settle_ms: 400 },
     log: (level, msg) => {
       if (level === 'error' || level === 'warn') console.log(`    [${level}] ${msg}`)
     },
@@ -52,10 +53,17 @@ async function main() {
 
   await host.start(api)
   check('宿主启动后加载到插件', () => assert.ok(host.pluginCount() >= 1, `pluginCount=${host.pluginCount()}`))
+  /**
+   * npm 上的真实社区插件（作为 plugins/compat 的依赖随 pnpm install 装上）。
+   * 用的是"自动扫描 node_modules"这条路径；用户移除该依赖时这一项自动跳过。
+   */
+  const hasMarkdown = fs.existsSync('plugins/compat/node_modules/koishi-plugin-markdown')
   check(
-    'npm 上的真实社区插件被加载',
-    () => assert.ok(host.loaded.includes('koishi-plugin-markdown'), `loaded=${JSON.stringify(host.loaded)}`),
+    hasMarkdown ? '自动扫描并加载了 npm 上的真实社区插件' : '未安装 npm 真实插件样本（跳过该项）',
+    () => (hasMarkdown ? assert.ok(host.loaded.includes('koishi-plugin-markdown'), `loaded=${JSON.stringify(host.loaded)}`) : true),
   )
+  /** ctx.http 是绝大多数 Koishi 插件的硬依赖；它的入口是 CJS 嵌套 default，最容易装不上 */
+  check('官方 http 服务已装载（ctx.http 可用）', () => assert.ok(host.app.get('http'), 'ctx.http 缺失'))
 
   /** 造一条 JiuLi 私聊消息 */
   const makeEvent = (text, extra = {}) => ({

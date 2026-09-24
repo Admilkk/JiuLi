@@ -114,7 +114,7 @@ class BaseIDModel:
                 return False
         return True
 
-    # ---- 常用接口 ----
+    # 常用接口
 
     @classmethod
     async def data_exist(cls, **kwargs) -> bool:

@@ -124,7 +124,7 @@ class Bot:
         # 真实源码里多步会话用的是这个格式的 session id，与 Event.session_id 不同
         self.session_id = f"{self.bid}%%%{self.temp_gid}%%%{self.uid}"
 
-    # ---- 发送 ----
+    # 发送
 
     async def send(
         self,
@@ -177,7 +177,7 @@ class Bot:
         self.bridge.log("warn", "插件调用了 bot.unsend()，JiuLi 的 GsCore 兼容层暂未代理撤回")
         return None
 
-    # ---- 多步会话 ----
+    # 多步会话
 
     async def receive_resp(
         self,

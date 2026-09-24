@@ -45,7 +45,7 @@ const copyTree = (from, to) => {
 }
 for (const dir of ['adapter']) copyTree(path.join('plugins', dir), path.join(PLUGINS_DIR, dir))
 
-/* ---------- 配置 ---------- */
+/* 配置 */
 fs.writeFileSync(
   'test/.tmp-compat-cfg/bot.yaml',
   'log_level: info\nplugin_load_timeout: 40\nfile_watch: false\nlog_msg: true\nno_handler_tip: false\n',
@@ -56,7 +56,7 @@ fs.writeFileSync(
   ['enabled: true', 'timeout_ms: 10000', 'intercept: true', 'ecosystems:', '  koishi:', '    enabled: true', '  gscore:', '    enabled: true', '  astrbot:', '    enabled: true', ''].join('\n'),
 )
 
-/* ---------- 云崽插件探针：与外来插件抢同一个指令 ---------- */
+/* 云崽插件探针：与外来插件抢同一个指令 */
 fs.mkdirSync(path.join(PLUGINS_DIR, '探针'), { recursive: true })
 fs.writeFileSync(
   path.join(PLUGINS_DIR, '探针', 'index.js'),
@@ -80,7 +80,7 @@ export default class CompatProbe extends JiuLiPlugin {
 `,
 )
 
-/* ---------- 运行 ---------- */
+/* 运行 */
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const results = []
 const check = (name, ok, extra) => {

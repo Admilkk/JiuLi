@@ -33,7 +33,7 @@ class StringConfig:
         self.load_config()
         StringConfig.all_config_list[config_name] = self
 
-    # ---- 读写 ----
+    # 读写
 
     def load_config(self) -> None:
         raw: Dict[str, Any] = {}
