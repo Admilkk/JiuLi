@@ -36,7 +36,6 @@ Chinese only for now:
 - [README.md](README.md) — install, CLI, config, compatibility
 - [docs/architecture.md](docs/architecture.md) — layers, dispatch, startup cost analysis
 - [docs/plugin-guide.md](docs/plugin-guide.md) — plugin development (legacy / native / DSL)
-- [docs/ported-plugin-patches.md](docs/ported-plugin-patches.md) — patches applied to ported ecosystem plugins
 
 ## License
 

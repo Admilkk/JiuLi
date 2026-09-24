@@ -209,8 +209,8 @@ Yunzai-QQBot-Plugin、Yunzai-ICQQ-Plugin、hl-icqq-web 均已实机验证。
 node jiuli a <插件仓库地址>     # 或手动复制目录后 pnpm install
 ```
 
-对插件所做的适配（跨插件路径、具名导出、`systeminformation` 惰性化等）逐条记录在
-[docs/ported-plugin-patches.md](docs/ported-plugin-patches.md)，插件更新后照着重新应用。
+对插件所做的适配（跨插件路径、具名导出、`systeminformation` 惰性化等）逐条记录在提交信息里，
+插件更新后照着重新应用。
 
 ## 配置
 
