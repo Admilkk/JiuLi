@@ -27,6 +27,24 @@ function truncate(str: string, length: number) {
   return str.length > length ? `${str.slice(0, length)}...` : str
 }
 
+/**
+ * 插件加载前预载 miao 的组件模块（`#miao`）
+ *
+ * genshin 的 model/db/BaseModel.js 顶层就 `Data.createDir(...)`，`Data` 来自 `#miao`；
+ * Node 在「模块含顶层 await + 多插件并发 import」时可能让依赖未初始化就被求值（TDZ：
+ * `Cannot access 'Data' before initialization`，重则 V8 Fatal）。
+ * 见 load() 里的调用处注释 —— 这里只负责「尽量提前求值」，失败一律忽略。
+ */
+async function preloadMiao() {
+  /** 用变量说明符：`#miao` 是 miao-plugin 的 imports 映射，TS 解析不到它的类型声明 */
+  const spec: string = '#miao'
+  try {
+    await import(spec)
+  } catch (err: any) {
+    util.makeLog('debug', ['预加载 #miao 失败（忽略，按原样继续）', err], 'Plugin')
+  }
+}
+
 /** 各适配器返回格式不一：{ error: [] } 空数组表示成功，也可能返回 Error 实例或字符串 */
 function hasSendError(res: any): boolean {
   if (!res || typeof res !== 'object') return false
@@ -159,6 +177,20 @@ class PluginsLoader {
       )
 
     util.makeLog('info', '扫描插件目录 plugins/ …', 'Plugin')
+
+    /**
+     * 预加载 miao 的组件模块（`#miao`）
+     *
+     * genshin 的 model/db/BaseModel.js 顶层就 `Data.createDir(...)`，而 `Data` 来自 `#miao`。
+     * Node 在「模块里有顶层 await + 多个插件并发 import」时会出现依赖还没初始化就被求值：
+     * `Cannot access 'Data' before initialization`（TDZ），重则 V8 Fatal。
+     * 典型触发者（实测）：ZZZ-Plugin 的 index.js 里 `Promise.allSettled([import(...), ...])`
+     * 并发导入自己的 app 模块，其中一个链到 genshin 数据层，正好撞上别的插件在求值 `#miao`。
+     *
+     * 这里在**任何插件之前**把 `#miao` 求值完：它自身不依赖 genshin（安全方向），
+     * 之后插件 import 它全是缓存命中，那个 TDZ 不可能再发生。没装 miao / 它自己坏了都只记 debug。
+     */
+    await preloadMiao()
 
     const files = await this.getPlugins()
     this.pluginCount = 0
