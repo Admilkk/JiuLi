@@ -1,7 +1,8 @@
 /**
  * Runtime（e.runtime）
- * 与云崽的差异：默认不做 MysInfo / NoteUser 初始化，仅在第三方通过 Runtime.use()
- * 注册了扩展（eagerUser）时才执行用户初始化。
+ * 与云崽一致：分发前由 loader 调 ready()，插件可直接读 e.user / e.runtime.user（uid、ck）。
+ * `compat.runtime_user: false` 时退回懒加载，只在第三方通过 Runtime.use() 注册了
+ * 扩展（eagerUser）时才执行用户初始化。
  */
 import type { JiuLiEvent, RenderOptions } from './types.js'
 import cfg from './config/index.js'
@@ -22,24 +23,29 @@ export interface RuntimeProvider {
 /** genshin 生态懒加载入口，不存在时各项为 undefined */
 const genshin: Record<string, any> = { loaded: false }
 
-async function loadGenshin() {
-  if (genshin.loaded) return genshin
-  genshin.loaded = true
-  const tryImport = async (spec: string) => {
-    try {
-      return (await import(spec)).default
-    } catch {
-      return undefined
+/** 共享同一个 import Promise：预热与首条消息并发时不会读到"加载到一半"的对象 */
+let genshinLoading: Promise<Record<string, any>> | null = null
+
+function loadGenshin() {
+  genshinLoading ??= (async () => {
+    genshin.loaded = true
+    const tryImport = async (spec: string) => {
+      try {
+        return (await import(spec)).default
+      } catch {
+        return undefined
+      }
     }
-  }
-  genshin.gsCfg = await tryImport('../../plugins/genshin/model/gsCfg.js')
-  genshin.MysApi = await tryImport('../../plugins/genshin/model/mys/mysApi.js')
-  genshin.MysInfo = await tryImport('../../plugins/genshin/model/mys/mysInfo.js')
-  genshin.NoteUser = await tryImport('../../plugins/genshin/model/mys/NoteUser.js')
-  genshin.MysUser = await tryImport('../../plugins/genshin/model/mys/MysUser.js')
-  genshin.Version = await tryImport('#miao')
-  if (genshin.Version) genshin.Version = genshin.Version.Version
-  return genshin
+    genshin.gsCfg = await tryImport('../../plugins/genshin/model/gsCfg.js')
+    genshin.MysApi = await tryImport('../../plugins/genshin/model/mys/mysApi.js')
+    genshin.MysInfo = await tryImport('../../plugins/genshin/model/mys/mysInfo.js')
+    genshin.NoteUser = await tryImport('../../plugins/genshin/model/mys/NoteUser.js')
+    genshin.MysUser = await tryImport('../../plugins/genshin/model/mys/MysUser.js')
+    genshin.Version = await tryImport('#miao')
+    if (genshin.Version) genshin.Version = genshin.Version.Version
+    return genshin
+  })()
+  return genshinLoading
 }
 
 export default class Runtime {
@@ -49,6 +55,26 @@ export default class Runtime {
   static use(provider: RuntimeProvider) {
     this.providers.push(provider)
     return this
+  }
+
+  /**
+   * 预热：提前把 genshin 生态（用户 / ck 模型）import 好
+   *
+   * 分发前要 `await ready()` 才能给插件 e.user，而动态 import 是秒级开销；
+   * 在启动阶段（与插件加载并行）预热一次，第一条消息就不用等它。
+   */
+  static async warmup() {
+    await loadGenshin()
+  }
+
+  /**
+   * 已加载的 genshin 生态模块：`{ gsCfg, MysApi, MysInfo, NoteUser, MysUser, Version }`
+   *
+   * 未安装 genshin 时各项为 undefined。框架自带的兼容层（如云崽 ck 文件导出）用它读用户 ck，
+   * 这样第三方插件的数据结构变化只影响这一处。
+   */
+  static async ecosystem() {
+    return loadGenshin()
   }
 
   e: JiuLiEvent

@@ -145,6 +145,13 @@ class PluginsLoader {
     if (this.priority.length) return
 
     /**
+     * 预热云崽运行时用户初始化：与插件加载并行 import genshin 生态，
+     * 免得第一条消息在分发前 await 一个秒级的动态 import（compat.runtime_user 才需要）。
+     */
+    if (cfg.getCompat().runtime !== false && cfg.getCompat().runtime_user !== false)
+      Runtime.warmup().catch((err: any) => util.makeLog('debug', ['运行时预热失败', err], 'Runtime'))
+
+    /**
      * 先装模块解析钩子，再导入任何插件：插件目录下的模块会被打上代数戳，
      * 重载时代数 +1 即可让整张模块图（含 apps/ lib/ 里的嵌套模块）重新求值。
      * Node 偏老没有这个钩子时只提示一次，别让用户以为改了代码就一定生效。
@@ -272,6 +279,12 @@ class PluginsLoader {
   }
 
   buildEventIndex() {
+    /**
+     * 桶内顺序必须与优先级顺序一致：candidates() 直接返回桶里的顺序，
+     * 若在这里先按加载顺序建桶、事后再 sortPriority()，priority 就形同虚设
+     * （探针/插件只要 import 得快就排在 -Infinity 的系统插件前面，谁抢到指令随加载顺序漂移）。
+     */
+    this.sortPriority()
     this.eventIndex = new Map()
     for (const entry of this.priority) {
       const event = entry.plugin?.event || 'message'
@@ -530,7 +543,18 @@ class PluginsLoader {
     this.dealEvent(e, groupCfg)
     if (e.only_reply_at) this.setLimit(e, groupCfg)
     this.reply(e)
-    if (cfg.getCompat().runtime !== false) Runtime.attach(e)
+    /**
+     * 云崽在分发前就 `await Runtime.init(e)`：插件在规则/accept 里直接读 `e.user`、`e.runtime.user`
+     * 拿 uid / ck（逍遥的 #更新抽卡记录、一堆米游社插件都这么写）。
+     * JiuLi 同样默认初始化，`compat.runtime_user: false` 可关掉以省掉每条消息一次用户信息加载。
+     */
+    if (cfg.getCompat().runtime !== false) {
+      const runtime = Runtime.attach(e)
+      if (cfg.getCompat().runtime_user !== false)
+        await runtime
+          .ready()
+          .catch((err: any) => util.makeLog('debug', ['运行时用户信息初始化失败', err], 'Runtime'))
+    }
 
     /** 日志关闭或等级不足时不做任何字符串拼接 */
     const scene = util.describeScene(e)
@@ -718,9 +742,16 @@ class PluginsLoader {
         const now = Date.now()
         if (!this.hintThrottle[key] || now - this.hintThrottle[key] > 10000) {
           this.hintThrottle[key] = now
-          const tip = e.isMaster
-            ? `这条指令没有被执行（参数或触发条件不符）· 可发 #插件列表 查看可用指令`
-            : `这条指令没有响应 · 如果它是主人专属指令，请先发 #设置主人 绑定主人账号；也可能是参数不符`
+          /**
+           * 插件可以留一句更具体的提示（如 update 的"没有这个插件 / 匹配到多个插件"）：
+           * 它不能自己抢先回复（会截胡下面插件的同名指令），由框架在确实没人接手时才补发。
+           */
+          const tip =
+            e.__pluginHint ||
+            (e.isMaster
+              ? `这条指令没有被执行（参数或触发条件不符）· 可发 #插件列表 查看可用指令`
+              : `这条指令没有响应 · 如果它是主人专属指令，请先发 #设置主人 绑定主人账号；也可能是参数不符`)
+          delete e.__pluginHint
           util.makeLog('info', `提示无响应 · ${util.truncate(e.msg, 20)} · 命中 ${commandMatched.join('/')}`, 'Msg')
           /** 提示由框架发出，避免日志错误归属到最后一个匹配到的插件 */
           e.logPlugin = 'JiuLi'

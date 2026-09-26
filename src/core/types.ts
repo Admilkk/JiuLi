@@ -71,6 +71,11 @@ export interface JiuLiEvent {
   runtime?: any
   /** 插件链内数据传递 */
   store?: Map<string, unknown>
+  /**
+   * 规则命中但没插件接手时，由框架补发的具体提示
+   * （插件自己不能抢先回复，否则会截胡后面插件的同名指令）
+   */
+  __pluginHint?: string
   raw?: unknown
 }
 

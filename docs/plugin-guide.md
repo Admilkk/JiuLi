@@ -56,6 +56,17 @@ export class Demo extends plugin {
 
 `rule` 字段：`reg`（字符串/正则，预编译）、`fnc`、`event`（三段通配）、`permission`（master/owner/admin）、`log`。
 
+规则方法返回 `false` = 放弃这条指令，继续匹配后面的规则与插件。**规则写得宽（例如 `^#更新`）时不要在自己这里先 `reply` 再返回 false** —— 那句回复会挡在别人的同名指令前面（`#更新抽卡记录` 会被 `#更新` 吃掉）。要提示就把话挂到事件上，框架在确实没有插件接手时才补发：
+
+```js
+async fnc(e) {
+  if (!target) {
+    e.__pluginHint = `plugins/ 下没有「${name}」，可用 #插件列表 查看`   // 延迟提示，不截胡
+    return false
+  }
+}
+```
+
 上下文会话：
 
 ```js

@@ -28,7 +28,7 @@ lib/core/**  内核（由 src/** 编译）
    config/         配置中心（YAML + Proxy 回落 + 热更新）
    redis.ts        Redis + 内存降级
    render/         art-template Renderer + 后端加载器
-   runtime.ts      e.runtime（懒加载，genshin 生态动态接入）
+   runtime.ts      e.runtime / e.user（genshin 生态动态接入）
    events.ts       监听器基类 + 监听 / 适配器加载
    handler.ts      跨插件 handler 总线
    metrics.ts      插件耗时统计
@@ -146,7 +146,7 @@ deal(e):
                 → isMaster → 别名剥离 → only_reply_at
    5. setLimit
    6. reply(e)：包装 e.reply，支持 {recallMsg, at}、异常捕获、计数
-   7. Runtime.attach(e)：轻量挂载 e.runtime（重活懒加载）
+   7. Runtime.attach(e) + ready()：挂载 e.runtime，并初始化 e.user（compat.runtime_user 可关）
    8. 候选插件：事件索引分桶 + checkDisable + filtEvent
    9. 上下文 hook：探针对象取 getContext，命中则执行（返回 'continue' 继续）
   10. only_reply_at 过滤 + 星铁 / 绝区零前缀标准化
@@ -162,7 +162,7 @@ deal(e):
 | 共享实例写入 `e` | `Object.assign(plugin, { e })`，实例长期持有最后一个事件 | 不污染共享实例；上下文检查用探针对象，规则调用用每事件实例 |
 | 实例创建 | accept 与 rule 各 `new` 一次 | 默认复用（`perf.once_instance`） |
 | 计数写入 | 每条消息直接写 16~32 个键 | 内存聚合 + 定时批量写回，键格式不变 |
-| `e.runtime` | 每条消息 await `Runtime.init` | 懒挂载，需要时才动态加载 genshin 生态 |
+| `e.runtime` / `e.user` | 每条消息 await `Runtime.init` | 同样每条消息初始化（`compat.runtime_user: false` 可退回懒加载） |
 | 候选插件 | 遍历全部插件 | 事件索引分桶（`perf.event_index`） |
 
 ## 渲染
@@ -182,6 +182,10 @@ deal(e):
   `cfg.redis.path`，仍失败则按 `redis_fallback` 降级为内存实现或退出。
   内存实现覆盖 string / hash / set / zset / list / scan / multi，未实现的命令返回 null 并告警一次。
 - **本地 Map**：`util.getMap(dir)` 基于 level（与云崽一致，数据目录 `data/*-leveldb`）。
+- **米游社 ck**：数据源是 `data/db/data.db`（genshin 插件的数据层：`Users` / `MysUsers` 表），
+  云崽 v3 的 `data/MysCookie/<qq>.yaml` 只作为**兼容导出**由 `plugins/system/mys-ck-compat.js` 维护
+  （生态插件按文件路径读 ck，`login_ticket` DB 不存，由该插件在用户粘贴 ck 时旁路捕获）。
+  启动顺序：genshin 迁移会"导入旧文件后删掉"，所以导出挂在 `online` 之后，并在文件缺失时按需重建。
 
 ## 扩展点
 

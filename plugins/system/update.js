@@ -27,7 +27,12 @@ export default class Update extends JiuLiPlugin {
         { reg: '^#更新日志\\s*(.*)$', fnc: 'updateLog' },
         { reg: '^#全部(安?静)?(强制)?更新$', fnc: 'updateAll', permission: 'master', log: false },
         { reg: '^#重启更新$', fnc: 'update', permission: 'master', log: false },
-        { reg: '^#(安?静)?(强制)?更新\\s*(.*)$', fnc: 'update', permission: 'master' },
+        /**
+         * 这里刻意不写 permission：规则 `^#更新` 会命中 `#更新抽卡记录` 这类插件指令，
+         * 权限校验失败时 loader 会回一句"没有权限哦"并终止分发，插件就再也接不到了。
+         * 与云崽一致：交给 update() 内部 `if (!this.e?.isMaster) return false` 安静让位。
+         */
+        { reg: '^#(安?静)?(强制)?更新\\s*(.*)$', fnc: 'update' },
       ],
     })
     if (e) this.e = e
@@ -73,7 +78,11 @@ export default class Update extends JiuLiPlugin {
   /**
    * 把名字解析成 plugins/ 下的目录名；空串表示框架本体，false 表示没找到
    *
-   * 宽松匹配：`#更新ICQQ` 能命中 `Yunzai-ICQQ-Plugin`
+   * 宽松匹配：`#更新ICQQ` 能命中 `Yunzai-ICQQ-Plugin`，`#更新ai` 能列出所有含 ai 的候选
+   *
+   * 命中不了 / 匹配到多个时**不在这里回复**，只把提示挂在 `e.__pluginHint` 上：
+   * 规则 `^#更新` 天然会命中 `#更新抽卡记录` 这类插件指令（逍遥、miao…），
+   * 本体一旦自己应答就等于把插件指令截胡了 —— 提示交给框架在「所有插件都没接手」时补发。
    */
   async getPlugin(name) {
     const plugin = String(
@@ -95,10 +104,10 @@ export default class Update extends JiuLiPlugin {
     })
     if (hits.length === 1) return (this.typeName = hits[0])
     if (hits.length > 1) {
-      await this.reply(`「${plugin}」匹配到多个插件：\n${hits.join(' · ')}\n请写明完整目录名`)
+      this.e.__pluginHint = `「${plugin}」匹配到多个插件：\n${hits.join(' · ')}\n请写明完整目录名`
       return false
     }
-    await this.reply(`plugins/ 下没有「${plugin}」，可用 #插件列表 查看`)
+    this.e.__pluginHint = `plugins/ 下没有「${plugin}」，可用 #插件列表 查看`
     return false
   }
 

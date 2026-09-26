@@ -12,6 +12,10 @@ compat:
   globals: true
   # 事件对象注入 e.runtime（懒加载，首次访问时创建）
   runtime: true
+  # 分发前初始化云崽用户对象（e.user / e.runtime.user）
+  #   开启：与云崽/TRSS 一致，插件在规则里直接就能拿到 uid、ck（如逍遥的 #更新抽卡记录）
+  #   关闭：省掉每条消息一次用户信息加载，但依赖 e.runtime.user 的云崽插件会拿不到数据
+  runtime_user: true
 
 # ---- 存储 ----
 # Redis 不可用且 host 为本机时，降级为内存实现（重启后数据丢失）

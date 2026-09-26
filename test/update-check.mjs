@@ -116,7 +116,34 @@ check('getPlugin("MIAO") 忽略大小写', (await probe.getPlugin('MIAO')) === '
 const bad = makeEvent('#更新不存在的插件')
 const badUp = new Update(bad.e)
 badUp.e = bad.e
-check('getPlugin 未找到时返回 false 且给出提示', (await badUp.getPlugin()) === false && bad.sent[0]?.includes('没有'))
+check(
+  'getPlugin 未找到时返回 false、不回复，只留 e.__pluginHint（不截胡插件指令）',
+  (await badUp.getPlugin()) === false &&
+    bad.sent.length === 0 &&
+    /没有/.test(bad.e.__pluginHint || ''),
+  bad.e.__pluginHint,
+)
+
+const ambiguous = makeEvent('#更新plugin')
+const ambUp = new Update(ambiguous.e)
+ambUp.e = ambiguous.e
+check(
+  'getPlugin 多个候选时保留「匹配到多个插件」提示，但同样不抢先回复',
+  (await ambUp.getPlugin()) === false &&
+    ambiguous.sent.length === 0 &&
+    /匹配到多个插件/.test(ambiguous.e.__pluginHint || ''),
+  ambiguous.e.__pluginHint,
+)
+
+/* ---- 1b. `#更新xxx` 前缀的插件指令不能被本体应答 ----
+ * 逍遥的 #更新抽卡记录、miao 的 #更新面板 都会被规则 ^#(安?静)?(强制)?更新 命中，
+ * 本体必须返回 false 交还给插件（云崽行为），自己回一句"没有这个插件"就是抢指令。 */
+const conflict = await run('#更新抽卡记录')
+check(
+  '#更新抽卡记录 不被本体更新指令应答',
+  conflict.sent.length === 0 && conflict.up.isUp === false,
+  conflict.sent.join(' | ') || '（无回复，符合预期）',
+)
 
 /* ---- 2. #更新ICQQ（有新提交 → 更新成功 + 日志） ---- */
 pushUpdate(icqq.work, 'feat: ICQQ 新功能')
