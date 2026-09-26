@@ -175,6 +175,13 @@ deal(e):
   多进程共享 ws 端点、截图数达阈值重启、空闲自动关闭。
 - 两条调用通道：`e.runtime.render(plugin, path, data, cfg)` 与 `lib/puppeteer/puppeteer.js` 的
   `screenshot` / `screenshots`。
+- **浏览器选择**：`chromiumPath`（`renderers/puppeteer/config.yaml`，或更推荐
+  `config/config/bot.yaml` 的 `chromium_path`）→ puppeteer 自带缓存 → 系统已装浏览器 → 自动安装。
+  自动选择会**跳过 snap 版浏览器**（`/snap/bin/*` 及指向 snap 启动器的软链）：
+  snap 沙箱读不到 `--user-data-dir`，截图会缺内容 / 白屏而且不报错；只有显式配置时才按配置使用。
+- **渲染配置归属**：`renderers/<id>/config.yaml` 是**用户文件**（不入库，首次运行由
+  `RendererLoader` 从 `config_default.yaml` 复制），所以 `#更新` 不会覆盖用户的改动；
+  升级只更新 `config_default.yaml` 模板。
 
 ## 存储
 

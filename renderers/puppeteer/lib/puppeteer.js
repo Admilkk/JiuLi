@@ -14,6 +14,26 @@ import cfg from '../../../lib/config/config.js'
 
 let mac = ''
 
+/**
+ * 是否是 snap 安装的浏览器
+ *
+ * snap 版 chromium 跑在沙箱里，读不到 `--user-data-dir`（以及页面里的本地资源），
+ * 表现就是截图内容缺失 / 白屏，且不报错 —— 所以**自动选择时一律跳过**。
+ * 判定：路径里有 /snap/，或软链的真实目标是 snap 启动器（/snap/bin/chromium 就是这种）。
+ * 用户显式在 config.yaml / bot.yaml 里写死 chromiumPath 时仍然照用（只给警告）。
+ */
+export async function isSnapBrowser(p) {
+  if (!p) return false
+  if (/\/snap\//.test(p)) return true
+  try {
+    const real = await fs.realpath(p)
+    /** /usr/bin/chromium 这类软链最终指向 snap 启动器时，同样算 snap */
+    return /\/snap\//.test(real) || path.basename(real) === 'snap'
+  } catch {
+    return false
+  }
+}
+
 export default class Puppeteer extends Renderer {
   constructor(config) {
     super({
@@ -69,6 +89,9 @@ export default class Puppeteer extends Renderer {
    *
    * 顺序：配置的 chromiumPath → puppeteer 自带缓存 → 系统已装的浏览器 →
    *       自动安装（Linux 优先 apt/yum/dnf 装 chromium，顺带装中文字体；否则用 puppeteer 下载）
+   * **自动选择时会跳过 snap 版浏览器**（/snap/bin/* 及指向 snap 启动器的软链）：
+   * snap 沙箱读不到 --user-data-dir，截图会缺内容/白屏而且不报错；
+   * 只有用户显式配置 chromiumPath 时才按配置用（并给一条警告）。
    * 失败不抛错，返回 '' 由调用方提示（渲染功能停用，不影响其他功能）
    */
   async resolveExecutable() {
@@ -90,15 +113,25 @@ export default class Puppeteer extends Renderer {
     }
 
     const configured = this.config.executablePath
-    if (configured && (await isFile(configured))) return configured
+    if (configured && (await isFile(configured))) {
+      if (await isSnapBrowser(configured))
+        Bot.makeLog(
+          'warn',
+          `配置的浏览器是 snap 版（${configured}）：snap 沙箱常导致截图缺内容/白屏\n` +
+            '  建议换成系统版 Chrome/Chromium，或在 config/config/bot.yaml 里把 chromium_path 指到别的浏览器',
+          'Render',
+        )
+      else Bot.makeLog('info', `使用配置的浏览器 · ${configured}`, 'Render')
+      return configured
+    }
 
     /** puppeteer 自带缓存（装了才会命中） */
     try {
       const p = await puppeteer.executablePath()
-      if (p && (await isFile(p))) return p
+      if (p && (await isFile(p)) && !(await isSnapBrowser(p))) return p
     } catch {}
 
-    /** 系统已装的浏览器 */
+    /** 系统已装的浏览器（跳过 snap） */
     const candidates =
       process.platform === 'linux'
         ? ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', 'microsoft-edge']
@@ -108,13 +141,24 @@ export default class Puppeteer extends Renderer {
             '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
             '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
           ]
+    const skippedSnap = []
     for (const item of candidates) {
       const p = item.includes('/') ? item : fromPath(item)
-      if (p && (await isFile(p))) {
-        Bot.makeLog('info', `使用系统已安装的浏览器 · ${p}`, 'Render')
-        return p
+      if (!p || !(await isFile(p))) continue
+      if (await isSnapBrowser(p)) {
+        skippedSnap.push(p)
+        continue
       }
+      Bot.makeLog('info', `使用系统已安装的浏览器 · ${p}`, 'Render')
+      return p
     }
+    if (skippedSnap.length)
+      Bot.makeLog(
+        'warn',
+        `已跳过 snap 版浏览器：${[...new Set(skippedSnap)].join(' · ')}\n` +
+          '  snap 沙箱会导致截图缺内容/白屏；要指定其它浏览器请在 config/config/bot.yaml 配 chromium_path（升级不会覆盖）',
+        'Render',
+      )
 
     /** 自动安装（JIULI_NO_AUTO_INSTALL=1 可关掉，适合不想让框架装东西的场景） */
     if (!process.env.JIULI_NO_AUTO_INSTALL && process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
@@ -139,7 +183,8 @@ export default class Puppeteer extends Renderer {
         }
         for (const name of ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable']) {
           const p = fromPath(name)
-          if (p && (await isFile(p))) {
+          /** Ubuntu 的 apt chromium 是 snap 中转包，装完还是 /snap/bin/chromium → 照样跳过，走下面的 puppeteer 下载 */
+          if (p && (await isFile(p)) && !(await isSnapBrowser(p))) {
             Bot.makeLog('mark', `浏览器已就绪 · ${p}`, 'Render')
             return p
           }

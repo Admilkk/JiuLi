@@ -3,6 +3,9 @@
  * 只做一次截图，不启动适配器
  */
 import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
+
+const ROOT = process.cwd()
 
 for (const dir of ['logs', 'data', 'temp', 'resources']) fs.mkdirSync(dir, { recursive: true })
 const { default: JiuLiBot } = await import('../lib/core/bot.js')
@@ -94,11 +97,47 @@ if (!colored) {
 console.log(`✅ emoji 字体可用 · 👑 彩色像素 ${colored} 个`)
 
 /**
+ * snap 版浏览器必须被自动跳过
+ *
+ * snap 沙箱读不到 --user-data-dir，截图会缺内容 / 白屏而且不报错；
+ * 自动选择时一律跳过（/snap/bin/* 及指向 snap 启动器的软链），只有显式配置才照用。
+ */
+const { default: PuppeteerRenderer, isSnapBrowser } = await import('../renderers/puppeteer/lib/puppeteer.js')
+const snapCases = [
+  ['/snap/bin/chromium', true],
+  ['/var/lib/snapd/snap/bin/chromium', true],
+  ['/snap/chromium/1234/usr/lib/chromium-browser/chrome', true],
+  ['/usr/bin/google-chrome', false],
+  ['/usr/lib/chromium/chromium', false],
+  ['C:/Program Files/Google/Chrome/Application/chrome.exe', false],
+]
+const snapWrong = []
+for (const [p, want] of snapCases) if ((await isSnapBrowser(p)) !== want) snapWrong.push(`${p} → ${!want}`)
+if (snapWrong.length) {
+  console.log(`❌ snap 浏览器识别不对：${snapWrong.join('; ')}`)
+  process.exit(1)
+}
+console.log(`✅ snap 浏览器识别正确（${snapCases.length} 个路径样例，自动选择会跳过 snap）`)
+
+/** renderers 下的 config.yaml 必须是「用户文件」：不入库，才能保证 #更新 不覆盖用户改动 */
+try {
+  const tracked = execFileSync('git', ['ls-files', 'renderers/*/config.yaml'], { cwd: ROOT })
+    .toString()
+    .trim()
+  if (tracked) {
+    console.log(`❌ 这些渲染配置被 git 跟踪了（#更新 会覆盖用户改动）：${tracked.replace(/\n/g, ' ')}`)
+    process.exit(1)
+  }
+  console.log('✅ renderers/*/config.yaml 未被 git 跟踪（首次运行从 config_default.yaml 复制）')
+} catch {
+  console.log('⏭️  跳过「渲染配置是否入库」检查（当前目录不是 git 仓库）')
+}
+
+/**
  * 空闲回收回归：过去这里写的是 browser.removeListener（Browser 没有这个方法），
  * 抛错后浏览器永远关不掉 —— 内存越吃越多，新装的字体也一直不生效。
  */
 console.log(`\n浏览器事件接口：off ${typeof browser.off} · removeListener ${typeof browser.removeListener}`)
-const { default: PuppeteerRenderer } = await import('../renderers/puppeteer/lib/puppeteer.js')
 const idle = new PuppeteerRenderer({ idleTime: 0.001 })
 let closed = false
 /** 故意只给 close：模拟没有 removeListener 的 Browser */

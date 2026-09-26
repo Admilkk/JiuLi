@@ -151,6 +151,57 @@ export default class Update extends JiuLiPlugin {
     return urls
   }
 
+  /**
+   * 游离 HEAD 容错：仓库处于 detached HEAD 时 `git pull` 永远失败
+   *
+   * 实测有用户的仓库停在 detached HEAD（`git status` 显示 `## HEAD (no branch)`），
+   * 他发 #更新 时 `git log` 看起来已经是新版、实际代码一行没变，排查半天。
+   * 这里先按 origin/HEAD → master → main 的顺序切回分支再更新。
+   * @returns true 可以继续更新；false 表示切分支失败（已回复原因）
+   */
+  async ensureBranch(plugin = '') {
+    const head = String((await this.exec('git symbolic-ref --short -q HEAD', plugin)).stdout || '').trim()
+    /** 正常在分支上，什么都不用做 */
+    if (head) return true
+
+    const remoteHead = String((await this.exec('git rev-parse --abbrev-ref origin/HEAD', plugin)).stdout || '').trim()
+    const candidates = []
+    if (remoteHead && !remoteHead.includes('HEAD')) candidates.push(remoteHead.replace(/^origin\//, ''))
+    candidates.push('master', 'main')
+
+    for (const branch of [...new Set(candidates)].filter(Boolean)) {
+      const hasRef = async ref => !(await this.exec(`git show-ref --verify --quiet ${ref}`, plugin)).error
+      /** 本地已有该分支就切过去（保留本地提交）；只有远端有就直接建分支跟踪它 */
+      const cmd = (await hasRef(`refs/heads/${branch}`))
+        ? `git checkout ${branch}`
+        : (await hasRef(`refs/remotes/origin/${branch}`))
+          ? `git checkout -B ${branch} origin/${branch}`
+          : ''
+      if (!cmd) continue
+
+      const ret = await this.exec(cmd, plugin)
+      if (ret.error) {
+        await this.reply(
+          `「${this.typeName}」处于游离 HEAD，自动切回 ${branch} 失败：\n${ret.stderr || ret.error.message}\n` +
+            `本地若有未提交改动，先 git stash（或确认不要了）再重试`,
+        )
+        return false
+      }
+      Bot.makeLog(
+        'mark',
+        `${this.e?.logFnc || ''} 游离 HEAD → 已切回分支 ${branch}`,
+        'Update',
+      )
+      if (!this.quiet) await this.reply(`检测到仓库处于游离 HEAD（git pull 会一直失败），已自动切回分支 ${branch}`)
+      return true
+    }
+
+    await this.reply(
+      `「${this.typeName}」处于游离 HEAD，且找不到可用分支（origin/HEAD、master、main 都没有），无法自动切回`,
+    )
+    return false
+  }
+
   /** 更新一个仓库：plugin 为空表示框架本体 */
   async runUpdate(plugin = '') {
     if (!(await Bot.fsStat(path.join(plugin ? `plugins/${plugin}` : '.', '.git')))) {
@@ -160,6 +211,9 @@ export default class Update extends JiuLiPlugin {
       return false
     }
     this.typeName = plugin || 'JiuLi'
+
+    /** 游离 HEAD 容错：否则 git pull 永远失败，用户还以为更新过了 */
+    if (!(await this.ensureBranch(plugin))) return false
 
     let cmd = 'git pull'
     let type = '更新'

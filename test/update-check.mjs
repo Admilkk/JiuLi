@@ -226,6 +226,29 @@ check(
   wrong.length ? wrong.map(([m, f]) => `${m} → ${route(m)}（应 ${f}）`).join('; ') : cases.map(c => c[0]).join(' '),
 )
 
+/* ---- 10. 游离 HEAD 容错（用户实测：detached 时 #更新 看着成功、代码其实没变） ---- */
+const readBranch = () => {
+  try {
+    return git(icqq.clone, 'symbolic-ref', '--short', '-q', 'HEAD')
+  } catch {
+    return ''
+  }
+}
+git(icqq.clone, 'checkout', '--detach', 'HEAD')
+check('夹具已切成游离 HEAD', readBranch() === '', readBranch() || '(no branch)')
+pushUpdate(icqq.work, 'feat: 游离 HEAD 测试用的新提交')
+const rDetached = await run('#更新ICQQ')
+check(
+  '游离 HEAD 自动切回分支',
+  readBranch() === 'master',
+  readBranch() || '(no branch)',
+)
+check(
+  '切回分支后照常更新成功',
+  rDetached.sent.some(m => m.includes('更新成功')) && rDetached.sent.some(m => m.includes('游离 HEAD')),
+  rDetached.sent.join(' | ').slice(0, 160),
+)
+
 /** 先离开临时目录：Windows 下删不掉进程当前所在的目录 */
 process.chdir(ROOT)
 try {

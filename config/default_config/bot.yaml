@@ -45,7 +45,8 @@ msg_type_count: false
 # 以/开头转为#
 /→#: true
 
-# chromium其他路径
+# chromium 其他路径（留空 = 自动挑；自动选择会跳过 snap 版浏览器，snap 沙箱会导致截图缺内容）
+# 这个文件在 config/ 下，属于你自己的配置，#更新 不会覆盖
 chromium_path:
 # puppeteer接口地址
 puppeteer_ws:
