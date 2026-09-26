@@ -1,8 +1,8 @@
 /**
  * Runtime（e.runtime）
- * 与云崽一致：分发前由 loader 调 ready()，插件可直接读 e.user / e.runtime.user（uid、ck）。
- * `compat.runtime_user: false` 时退回懒加载，只在第三方通过 Runtime.use() 注册了
- * 扩展（eagerUser）时才执行用户初始化。
+ *
+ * 默认只做轻量挂载：不初始化用户信息，也不 import genshin 生态模块（理由见 loadGenshin）。
+ * 第三方通过 Runtime.use() 注册了扩展（eagerUser）时才在分发前初始化。
  */
 import type { JiuLiEvent, RenderOptions } from './types.js'
 import cfg from './config/index.js'
@@ -23,10 +23,20 @@ export interface RuntimeProvider {
 /** genshin 生态懒加载入口，不存在时各项为 undefined */
 const genshin: Record<string, any> = { loaded: false }
 
-/** 共享同一个 import Promise：预热与首条消息并发时不会读到"加载到一半"的对象 */
+/** 共享同一个 import Promise：并发拿到的不会是"加载到一半"的对象 */
 let genshinLoading: Promise<Record<string, any>> | null = null
 
-function loadGenshin() {
+/**
+ * 取 genshin 生态模块
+ *
+ * **只有 `Runtime.ecosystemReady`（genshin 插件已成功加载）时才真的去 import**：
+ * 那些模块是 genshin 插件自己 import 的，加载成功时这里全是 ESM 缓存命中，不产生求值；
+ * 插件缺失 / 加载报错时它的模块图可能停在 errored 或半求值状态，框架再 import 一次
+ * 会复用这些坏模块 —— 轻则 `Cannot access 'Data' before initialization`（TDZ），
+ * 重则触发 V8 Fatal（`Check failed: module->status() == kLinked …`）直接把进程干掉。
+ */
+function loadGenshin(): Promise<Record<string, any>> {
+  if (!Runtime.ecosystemReady) return Promise.resolve({ ...genshin, ready: false })
   genshinLoading ??= (async () => {
     genshin.loaded = true
     const tryImport = async (spec: string) => {
@@ -58,20 +68,23 @@ export default class Runtime {
   }
 
   /**
-   * 预热：提前把 genshin 生态（用户 / ck 模型）import 好
+   * genshin 插件是否已成功加载（由 loader 在导入成功后标记）
    *
-   * 分发前要 `await ready()` 才能给插件 e.user，而动态 import 是秒级开销；
-   * 在启动阶段（与插件加载并行）预热一次，第一条消息就不用等它。
+   * 只有它为 true 时才允许框架去 import 生态模块：那些模块已经由插件正常求值完，
+   * import 是纯缓存命中；插件没加载好时框架一律不碰它的模块图（见 loadGenshin 注释）。
    */
-  static async warmup() {
-    await loadGenshin()
+  static ecosystemReady = false
+
+  /** 由 loader 调用：plugins/genshin 导入成功 */
+  static markEcosystemReady() {
+    this.ecosystemReady = true
   }
 
   /**
    * 已加载的 genshin 生态模块：`{ gsCfg, MysApi, MysInfo, NoteUser, MysUser, Version }`
    *
-   * 未安装 genshin 时各项为 undefined。框架自带的兼容层（如云崽 ck 文件导出）用它读用户 ck，
-   * 这样第三方插件的数据结构变化只影响这一处。
+   * 未安装 / 未成功加载 genshin 时各项为 undefined。框架自带的兼容层（如云崽 ck 文件导出）
+   * 用它读用户 ck，这样第三方插件的数据结构变化只影响这一处。
    */
   static async ecosystem() {
     return loadGenshin()

@@ -48,6 +48,16 @@ const copyTree = (from, to) => {
 for (const dir of ['system', 'adapter'])
   if (fs.existsSync(path.join('plugins', dir))) copyTree(path.join('plugins', dir), path.join(PLUGINS_DIR, dir))
 copyTree(path.join('plugins', 'xiaoyao-cvs-plugin'), path.join(PLUGINS_DIR, 'xiaoyao-cvs-plugin'))
+/**
+ * 生态闸门：框架只在「genshin 插件导入成功」后才会去 import 它的模型。
+ * 这里放一个空壳 genshin 插件，等价于真实服务器上 genshin 正常加载的情况
+ * （真实部署里插件自己会把 model/ 下的模块求值好，框架的 import 都是缓存命中）。
+ */
+fs.mkdirSync(path.join(PLUGINS_DIR, 'genshin'), { recursive: true })
+fs.writeFileSync(
+  path.join(PLUGINS_DIR, 'genshin', 'index.js'),
+  '// 测试用空壳：只让框架认为 genshin 生态可用（真实部署由 genshin 插件自己加载模型）\nexport default class {}\n',
+)
 fs.mkdirSync(path.join(PLUGINS_DIR, 'node_modules'), { recursive: true })
 try {
   fs.symlinkSync(path.resolve('.'), path.join(PLUGINS_DIR, 'node_modules', 'jiuli'), 'junction')
@@ -63,7 +73,17 @@ const { injectGlobals } = await import('../lib/core/globals.js')
 const { ensureDirs } = await import('../lib/core/start.js')
 const { redisInit } = await import('../lib/core/redis.js')
 const { setLogDir } = await import('../lib/core/log.js')
+const { default: Runtime } = await import('../lib/core/runtime.js')
 await ensureDirs()
+
+console.log('======== 0. 生态闸门：没加载好 genshin 插件时，框架绝不自己 import 它的模型 ========')
+console.log('  ecosystemReady =', Runtime.ecosystemReady, '（boot 前，应为 false）')
+const gated = await Runtime.ecosystem()
+console.log(
+  '  闸门关闭时 ecosystem().NoteUser =',
+  gated.NoteUser,
+  '（必须 undefined，否则框架会去动可能坏掉的模块图 → TDZ / V8 Fatal）',
+)
 
 const bot = new JiuLiBot()
 await injectGlobals(bot)
@@ -108,6 +128,12 @@ const send = async (msg, user_id = '10001', wait = 8000) => {
 }
 
 console.log('======== 1. #更新xxx 前缀的插件指令不再被本体截胡 ========')
+console.log(
+  '  生态闸门（genshin 插件加载成功后）：ecosystemReady =',
+  Runtime.ecosystemReady,
+  '· ecosystem().NoteUser 是函数?',
+  typeof (await Runtime.ecosystem()).NoteUser === 'function',
+)
 let r = await send('#更新抽卡记录')
 console.log('  命中链路：')
 for (const h of r.hit) console.log('    ·', h.slice(0, 150))
@@ -124,7 +150,7 @@ console.log('  回复：')
 for (const m of r.replies) console.log('    ▶', String(m).slice(0, 200).replace(/\n/g, ' | '))
 console.log('  → 期望：出现「plugins/ 下没有「不存在的插件」」（框架在所有插件都没接手后补发）')
 
-console.log('\n======== 3. 只有 DB 里的 ck（没有 data/MysCookie 文件）时还能不能拿到 uid ========')
+console.log('\n======== 3. 只有 DB 里的 ck（还没有兼容文件）时：复现逍遥的原始报错 ========')
 console.log('  data/MysCookie 存在?', fs.existsSync(path.join('data', 'MysCookie')), '（JiuLi 的 ck 在 data/db/data.db）')
 const gsPath = p => pathToFileURL(path.resolve('plugins/genshin', p)).href
 const { default: MysUser } = await import(gsPath('model/mys/MysUser.js'))
@@ -148,7 +174,7 @@ console.log('  逍遥的 getBingCookie =', JSON.stringify(await gsCfg.getBingCoo
 r = await send('#更新抽卡记录', FAKE_QQ)
 console.log('  回复：')
 for (const m of r.replies) console.log('    ▶', String(m).slice(0, 200).replace(/\n/g, ' | '))
-console.log('  → 期望：uid 变成真实的 ' + FAKE_UID + '（走 e.user 兜底），不再 undefined')
+console.log('  → 期望：uid:undefined（兼容文件还没写出来，逍遥只认文件路径，这就是原始报错）')
 
 console.log('\n======== 4. 逍遥侧绑定 stoken 后，authkey 请求就能带上 cookie ========')
 const { default: MihoyoApi } = await import(
@@ -198,6 +224,11 @@ if (fs.existsSync(COMPAT_FILE))
     console.log('    ' + line)
 console.log('  逍遥读到 =', JSON.stringify(await gsCfg.getBingCookie(FAKE_QQ)))
 console.log('  → 期望：文件里有真实 uid/ck 与捕获到的 login_ticket，逍遥 getBingCookie 能直接拿到')
+
+r = await send('#更新抽卡记录', FAKE_QQ, 8000)
+console.log('  再发 #更新抽卡记录：')
+for (const m of r.replies) console.log('    ▶', String(m).slice(0, 200).replace(/\n/g, ' | '))
+console.log('  → 期望：uid 不再是 undefined（这次是从兼容文件里拿到的，不需要 e.user）')
 
 console.log('\n======== 7. 文件被删后按需重建 + #同步ck ========')
 fs.rmSync(COMPAT_FILE, { force: true })

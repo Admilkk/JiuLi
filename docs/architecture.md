@@ -146,7 +146,7 @@ deal(e):
                 → isMaster → 别名剥离 → only_reply_at
    5. setLimit
    6. reply(e)：包装 e.reply，支持 {recallMsg, at}、异常捕获、计数
-   7. Runtime.attach(e) + ready()：挂载 e.runtime，并初始化 e.user（compat.runtime_user 可关）
+   7. Runtime.attach(e)：只挂载 e.runtime（e.user 由插件按需通过 e.runtime 接口初始化）
    8. 候选插件：事件索引分桶 + checkDisable + filtEvent
    9. 上下文 hook：探针对象取 getContext，命中则执行（返回 'continue' 继续）
   10. only_reply_at 过滤 + 星铁 / 绝区零前缀标准化
@@ -162,7 +162,7 @@ deal(e):
 | 共享实例写入 `e` | `Object.assign(plugin, { e })`，实例长期持有最后一个事件 | 不污染共享实例；上下文检查用探针对象，规则调用用每事件实例 |
 | 实例创建 | accept 与 rule 各 `new` 一次 | 默认复用（`perf.once_instance`） |
 | 计数写入 | 每条消息直接写 16~32 个键 | 内存聚合 + 定时批量写回，键格式不变 |
-| `e.runtime` / `e.user` | 每条消息 await `Runtime.init` | 同样每条消息初始化（`compat.runtime_user: false` 可退回懒加载） |
+| `e.runtime` / `e.user` | 每条消息 await `Runtime.init` | 只挂 `e.runtime`；`e.user` 由插件自己调 `e.runtime` 接口时按需初始化 |
 | 候选插件 | 遍历全部插件 | 事件索引分桶（`perf.event_index`） |
 
 ## 渲染
@@ -184,8 +184,16 @@ deal(e):
 - **本地 Map**：`util.getMap(dir)` 基于 level（与云崽一致，数据目录 `data/*-leveldb`）。
 - **米游社 ck**：数据源是 `data/db/data.db`（genshin 插件的数据层：`Users` / `MysUsers` 表），
   云崽 v3 的 `data/MysCookie/<qq>.yaml` 只作为**兼容导出**由 `plugins/system/mys-ck-compat.js` 维护
-  （生态插件按文件路径读 ck，`login_ticket` DB 不存，由该插件在用户粘贴 ck 时旁路捕获）。
-  启动顺序：genshin 迁移会"导入旧文件后删掉"，所以导出挂在 `online` 之后，并在文件缺失时按需重建。
+  （生态插件按文件路径读 ck；`login_ticket` DB 不存，由该插件在用户粘贴 ck 时旁路捕获）。
+  该插件**只读 sqlite、不 import genshin 的任何模块**；导出挂在 `online` 之后（genshin 启动迁移
+  会"导入旧文件后删掉"），并在文件缺失时按需重建。
+- **生态闸门**：genshin 的 `model/gsCfg.js`（import `#miao.models`）、`model/db/BaseModel.js`
+  （顶层 `Data.createDir`，import `#miao`）与 miao 的模块图互相纠缠，链上还有顶层 await。
+  框架**绝不主动 import** 这批模块：只有 `plugins/genshin` 插件导入成功
+  （`Runtime.markEcosystemReady()`，那批模块已正常求值完，import 全是缓存命中）后才允许
+  `Runtime.ecosystem()` 去取。插件没加载好时一律绕开 —— 否则会复用 errored / 半求值的模块，
+  轻则 `Cannot access 'Data' before initialization`，重则 V8 Fatal 杀进程。
+  回归用例：`test/ecosystem-gate.mjs`。
 
 ## 扩展点
 

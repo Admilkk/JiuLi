@@ -2,17 +2,26 @@
  * 云崽 ck 文件兼容层（框架内置，随 `#更新` 分发，不改任何第三方插件）
  *
  * 背景
- *   JiuLi 把米游社 ck 存在 `data/db/data.db`（genshin 插件的数据层），而大量云崽插件不看 DB，
+ *   JiuLi 把米游社 ck 存在 `data/db/data.db`，而大量云崽插件不看 DB，
  *   只按 `data/MysCookie/<qq>.yaml` 找 uid / ck —— 逍遥插件的 `#更新抽卡记录` 就是这么读的
- *   （`apps/user.js` → `gsCfg.getBingCookie`）。JiuLi 迁移到 DB 后这个文件就没了，插件永远读不到，
+ *   （`apps/user.js` → `gsCfg.getBingCookie`）。JiuLi 迁到 DB 后这个文件就没了，插件永远读不到，
  *   表现就是 `uid:undefined,authkey获取失败：登录状态失效，请重新登录`。
  *
  * 做法
  *   1. 旁路捕获：用户粘贴 ck 的消息里带 `login_ticket`（DB 不保存这个字段，但米游社 stoken 要用），
  *      在 beforeMessage 里记到自己的数据目录；消息照常走 genshin 的绑定流程，绝不拦截。
- *   2. 导出：把 runtime 里的 uid / ck 按云崽 v3 的文件格式写回 `data/MysCookie/<qq>.yaml`。
- *      触发点：启动 online 后全量同步一次、ck 变动（首次绑定 / 重绑 / 删除）时补写、
- *      文件被删时按需重建（genshin 启动迁移会"导入即删"，所以导出必须放在它之后）。
+ *   2. 导出：把 uid / ck 按云崽 v3 的文件格式写回 `data/MysCookie/<qq>.yaml`。
+ *      触发点：启动 online 后全量同步一次、ck 变动（首次绑定 / 重绑）时补写、文件被删时按需重建
+ *      （genshin 启动迁移会"导入即删"，所以导出必须放在它之后）。
+ *
+ * 只读 sqlite，**不 import genshin 插件的任何模块**
+ *   genshin 的 model/gsCfg.js、model/db/BaseModel.js 与 miao 的 `#miao` / `#miao.models` 是
+ *   互相纠缠、还带顶层 await 的模块图；框架侧一旦主动 import，插件加载异常时会复用
+ *   errored / 半求值的模块 —— 轻则 `Cannot access 'Data' before initialization`（TDZ），
+ *   重则 V8 Fatal（`Check failed: module->status() == kLinked …`）把进程干掉。
+ *   所以这里直接读 DB 文件，表结构取自 genshin 的数据层：
+ *     Users(id, ltuids) · MysUsers(ltuid, type, ck, device, uids)
+ *   读不到就静默跳过，绝不影响任何插件的加载。
  *
  * 注意
  *   - 只导出国服（`type: mys`）的 gs / sr uid：genshin 的迁移靠 `region_name` 猜游戏与类型，
@@ -24,8 +33,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import YAML from 'yaml'
-import { JiuLiPlugin, Runtime, logger } from 'jiuli'
+import { Sequelize } from 'sequelize'
+import { JiuLiPlugin, logger } from 'jiuli'
 
+const DB_FILE = path.join(process.cwd(), 'data', 'db', 'data.db')
 /** 云崽 v3 的 ck 文件目录（生态插件按这个路径读） */
 const COOKIE_DIR = path.join(process.cwd(), 'data', 'MysCookie')
 /** genshin 启动迁移会把导入过的文件备份到这里，login_ticket 可以从这里捞回来 */
@@ -41,6 +52,59 @@ const CK_RE = /(ltoken|cookie_token)/
 const fileOf = qq => path.join(COOKIE_DIR, `${qq}.yaml`)
 
 /**
+ * 只读 DB：取出「绑定过国服 ck 的用户 → uid 条目」
+ * @param qq 指定用户；留空表示全部
+ * @returns {Promise<Array<{qq: string, entries: Array<object>}>>}
+ */
+async function readCkData(qq = '') {
+  if (!fs.existsSync(DB_FILE)) return []
+  const sequelize = new Sequelize({ dialect: 'sqlite', storage: DB_FILE, logging: false })
+  try {
+    const [users] = await sequelize.query(
+      qq ? 'SELECT id, ltuids FROM Users WHERE id = ?' : 'SELECT id, ltuids FROM Users',
+      qq ? { replacements: [String(qq)] } : {},
+    )
+    const [cks] = await sequelize.query('SELECT ltuid, type, ck, device, uids FROM MysUsers')
+    const byLtuid = new Map(cks.map(row => [String(row.ltuid), row]))
+
+    const ret = []
+    for (const row of users) {
+      const id = String(row.id || '')
+      if (!id) continue
+      const entries = []
+      for (const ltuid of String(row.ltuids || '').split(',').filter(Boolean)) {
+        const ck = byLtuid.get(String(ltuid))
+        /** 只导出国服 ck，见文件头注释 */
+        if (!ck?.ck || ck.type !== 'mys') continue
+        let uids = {}
+        try {
+          uids = JSON.parse(ck.uids || '{}') || {}
+        } catch {
+          uids = {}
+        }
+        for (const game of EXPORT_GAMES)
+          for (const uid of uids[game] || [])
+            entries.push({
+              uid: String(uid),
+              game,
+              ltuid: String(ltuid),
+              ck: ck.ck,
+              type: ck.type,
+              device_id: ck.device,
+            })
+      }
+      if (entries.length) ret.push({ qq: id, entries })
+    }
+    return ret
+  } catch (err) {
+    logger.debug(`[云崽ck兼容] 读取 ck 数据库失败：${err}`)
+    return []
+  } finally {
+    await sequelize.close().catch(() => {})
+  }
+}
+
+/**
  * 模块级状态
  *
  * beforeMessage / afterMessage 跑在加载期的共享实例上，而规则（#同步ck）跑在「每事件 new 一个」
@@ -50,9 +114,7 @@ let store = null
 /** 本轮消息里捕获到 login_ticket 的用户（首次绑定时 ck 要等分发结束才入库） */
 const pending = new Set()
 
-function emptyStore() {
-  return { tickets: {}, exported: {} }
-}
+const emptyStore = () => ({ tickets: {}, exported: {} })
 
 export default class MysCookieCompat extends JiuLiPlugin {
   constructor() {
@@ -86,41 +148,46 @@ export default class MysCookieCompat extends JiuLiPlugin {
    * 而逍遥等插件又是从 `data/MysCookie/<qq>.yaml` 里取它的 —— 只能在这儿顺手记下来。
    */
   async beforeMessage(e) {
-    const user = e.user
+    const qq = String(e.user_id || '')
     const raw = String(e.raw_message || e.msg || '')
-    if (raw.includes('login_ticket=') && CK_RE.test(raw)) {
-      const qq = String(e.user_id || '')
+    if (qq && raw.includes('login_ticket=') && CK_RE.test(raw)) {
       const ticket = TICKET_RE.exec(raw)?.[1]
-      if (qq) {
-        if (ticket) this.remember(qq, ticket)
-        pending.add(qq)
-        /** 已有 ck 的老用户重绑：文件立刻刷新；首次绑定等 afterMessage（那时 ck 才入库） */
-        if (user?.hasCk) await this.writeUser(user, ticket)
-        return
-      }
+      if (ticket) this.remember(qq, ticket)
+      pending.add(qq)
+      /** 已有 ck 的老用户重绑：文件立刻刷新；首次绑定等 afterMessage（那时 ck 才入库） */
+      const [data] = await readCkData(qq)
+      await this.writeUser(data || { qq, entries: [] }, ticket)
+      return
     }
 
-    /** 文件被删（例如 genshin 启动时"导入即删"）时按需重建，保证生态插件随时读得到 */
-    if (user?.hasCk && !fs.existsSync(fileOf(user.qq))) await this.writeUser(user)
+    /**
+     * 文件被删（genshin 启动迁移会"导入即删"）时按需重建。
+     * 只对**导出过**的用户做，避免每条消息都去读一次数据库。
+     */
+    if (qq && this.loadStore().exported[qq] && !fs.existsSync(fileOf(qq))) {
+      const [data] = await readCkData(qq)
+      if (data) await this.writeUser(data)
+    }
   }
 
   /** 分发后：ck 绑定已在本轮消息里完成，补写一次 */
   async afterMessage(e) {
     const qq = String(e.user_id || '')
     if (!qq || !pending.delete(qq)) return
-    await this.writeUser(e.user, this.ticketOf(qq))
+    const [data] = await readCkData(qq)
+    await this.writeUser(data || { qq, entries: [] }, this.ticketOf(qq))
   }
 
   /* ==================== 导出 ==================== */
 
-  /** 全量同步：runtime 里所有绑定过 ck 的用户 → data/MysCookie/<qq>.yaml */
+  /** 全量同步：DB 里所有绑定过 ck 的用户 → data/MysCookie/<qq>.yaml */
   async syncAll() {
-    const { NoteUser } = await Runtime.ecosystem()
-    if (typeof NoteUser?.forEach !== 'function') return 0
+    const all = await readCkData()
     let count = 0
-    await NoteUser.forEach(async user => {
-      if (await this.writeUser(user)) count++
-    })
+    for (const data of all) if (await this.writeUser(data)) count++
+    /** 清理：导出过、但现在 DB 里已经没有 ck 的用户（否则文件会被 genshin 迁移灌回 DB） */
+    for (const qq of Object.keys(this.loadStore().exported))
+      if (!all.some(u => u.qq === qq)) await this.writeUser({ qq, entries: [] })
     if (count > 0) logger.mark(`[云崽ck兼容] 已同步 ${count} 个用户的 ck → data/MysCookie/`)
     return count
   }
@@ -133,18 +200,20 @@ export default class MysCookieCompat extends JiuLiPlugin {
 
   /**
    * 写一个用户的兼容文件
-   * @param user NoteUser（runtime 初始化过的 e.user）
+   * @param data `{ qq, entries }`（readCkData 的结果；entries 为空表示没有 ck，走清理）
    * @param loginTicket 本次消息里捕获到的 login_ticket（可选）
    */
-  async writeUser(user, loginTicket = '') {
-    const qq = String(user?.qq || '')
+  async writeUser(data, loginTicket = '') {
+    const qq = String(data?.qq || '')
     if (!qq) return false
     const state = this.loadStore()
+    const entries = data?.entries || []
+    const file = fileOf(qq)
 
-    /** ck 已删除：只清理我们导出过的文件，云崽遗留文件不动 */
-    if (!user.hasCk) {
+    /** 没有 ck（含已删除）：只清理我们导出过的文件，云崽遗留文件不动 */
+    if (!entries.length) {
       if (state.exported[qq]) {
-        if (fs.existsSync(fileOf(qq))) fs.unlinkSync(fileOf(qq))
+        if (fs.existsSync(file)) fs.unlinkSync(file)
         delete state.exported[qq]
         this.saveStore()
       }
@@ -152,44 +221,27 @@ export default class MysCookieCompat extends JiuLiPlugin {
     }
 
     const ticket = loginTicket || this.ticketOf(qq)
-    const mainUid = String(user.getCkUid('gs') || '')
+    /** 没有原神 uid 时至少留一个 isMain：逍遥用 isMain 那条取 uid / game_uid */
+    const mainUid = String(entries.find(e => e.game === 'gs')?.uid || '')
     const out = {}
-    for (const ltuid in user.mysUsers) {
-      const mys = user.mysUsers[ltuid]
-      /** 只导出国服 ck，见文件头注释 */
-      if (!mys?.ck || mys.type !== 'mys') continue
-      for (const game of EXPORT_GAMES) {
-        for (const uid of mys.uids?.[game] || []) {
-          const id = String(uid)
-          out[id] = {
-            uid: id,
-            qq,
-            ltuid: mys.ltuid,
-            ck: mys.ck,
-            type: mys.type,
-            device_id: mys.device,
-            login_ticket: ticket,
-            isMain: id === mainUid,
-            region_name: GAME_REGION[game],
-          }
-        }
+    for (const e of entries) {
+      out[e.uid] = {
+        uid: e.uid,
+        qq,
+        ltuid: e.ltuid,
+        ck: e.ck,
+        type: e.type,
+        device_id: e.device_id,
+        login_ticket: ticket,
+        isMain: e.uid === mainUid,
+        region_name: GAME_REGION[e.game],
       }
     }
-
-    if (!Object.keys(out).length) {
-      if (state.exported[qq]) {
-        if (fs.existsSync(fileOf(qq))) fs.unlinkSync(fileOf(qq))
-        delete state.exported[qq]
-        this.saveStore()
-      }
-      return false
-    }
-    /** 没有原神 ck-uid 时至少留一个 isMain：逍遥用 isMain 那条取 uid / game_uid */
     if (!Object.values(out).some(ds => ds.isMain)) Object.values(out)[0].isMain = true
 
     fs.mkdirSync(COOKIE_DIR, { recursive: true })
     fs.writeFileSync(
-      fileOf(qq),
+      file,
       `# 由 JiuLi「云崽ck兼容」自动维护：改 ck 请用 #绑定ck，不要手工编辑\n${YAML.stringify(out)}`,
       'utf8',
     )

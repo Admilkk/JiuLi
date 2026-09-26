@@ -251,19 +251,6 @@ class PluginsLoader {
     /** 优先级排序 */
     this.sortPriority()
 
-    /**
-     * 预热云崽运行时用户初始化（compat.runtime_user）：让第一条消息不必等动态 import。
-     *
-     * **必须放在插件导入结束之后**：genshin 的 model/gsCfg.js（import `#miao.models`）、
-     * model/db/BaseModel.js（顶层 `Data.createDir(...)`，import `#miao`）与 miao 的模块图互相纠缠，
-     * 提前 import 会和并发加载的插件抢求值顺序，触发 `Cannot access 'Data' before initialization`
-     * （会让插件整体加载失败）。放在这里时 genshin 作为插件已加载完，几乎都是缓存命中。
-     */
-    if (cfg.getCompat().runtime !== false && cfg.getCompat().runtime_user !== false)
-      await Runtime.warmup().catch((err: any) =>
-        util.makeLog('debug', ['运行时用户初始化预热失败', err], 'Runtime'),
-      )
-
     /** 加载阶段结束：此后才就绪的插件（超时后才 import 完）会被自动补进分发 */
     this.loaded = true
     this.watchPlugins()
@@ -425,6 +412,13 @@ class PluginsLoader {
             if (packageErr && info.pkg) packageErr.push({ error: i.reason, file })
           }
       })
+      /**
+       * genshin 导入成功 → 允许框架去 import 它的模型（用户 / ck），此时都是缓存命中。
+       * 导入失败时**不要**标记：它的模块图可能停在 errored / 半求值状态，
+       * 框架再去 import 会复用坏模块（TDZ，甚至 V8 Fatal 把进程杀掉）。
+       */
+      if (success && String(file.name).split('/')[0].toLowerCase() === 'genshin')
+        Runtime.markEcosystemReady()
     } catch (error: any) {
       success = false
       const info = this.describeLoadError(error, file)
@@ -550,17 +544,13 @@ class PluginsLoader {
     if (e.only_reply_at) this.setLimit(e, groupCfg)
     this.reply(e)
     /**
-     * 云崽在分发前就 `await Runtime.init(e)`：插件在规则/accept 里直接读 `e.user`、`e.runtime.user`
-     * 拿 uid / ck（逍遥的 #更新抽卡记录、一堆米游社插件都这么写）。
-     * JiuLi 同样默认初始化，`compat.runtime_user: false` 可关掉以省掉每条消息一次用户信息加载。
+     * 注册运行时（e.runtime）。
+     *
+     * JiuLi 默认不做云崽那种「分发前 await Runtime.init(e)」：那是每条消息一次用户信息初始化，
+     * 而且会让框架主动 import genshin 生态模块（与 miao 互相纠缠、带顶层 await 的模块图，
+     * 插件加载异常时框架再 import 会 TDZ / V8 Fatal）。插件需要用户信息时自己调 e.runtime 的接口。
      */
-    if (cfg.getCompat().runtime !== false) {
-      const runtime = Runtime.attach(e)
-      if (cfg.getCompat().runtime_user !== false)
-        await runtime
-          .ready()
-          .catch((err: any) => util.makeLog('debug', ['运行时用户信息初始化失败', err], 'Runtime'))
-    }
+    if (cfg.getCompat().runtime !== false) Runtime.attach(e)
 
     /** 日志关闭或等级不足时不做任何字符串拼接 */
     const scene = util.describeScene(e)
