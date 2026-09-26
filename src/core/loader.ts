@@ -145,13 +145,6 @@ class PluginsLoader {
     if (this.priority.length) return
 
     /**
-     * 预热云崽运行时用户初始化：与插件加载并行 import genshin 生态，
-     * 免得第一条消息在分发前 await 一个秒级的动态 import（compat.runtime_user 才需要）。
-     */
-    if (cfg.getCompat().runtime !== false && cfg.getCompat().runtime_user !== false)
-      Runtime.warmup().catch((err: any) => util.makeLog('debug', ['运行时预热失败', err], 'Runtime'))
-
-    /**
      * 先装模块解析钩子，再导入任何插件：插件目录下的模块会被打上代数戳，
      * 重载时代数 +1 即可让整张模块图（含 apps/ lib/ 里的嵌套模块）重新求值。
      * Node 偏老没有这个钩子时只提示一次，别让用户以为改了代码就一定生效。
@@ -257,6 +250,19 @@ class PluginsLoader {
 
     /** 优先级排序 */
     this.sortPriority()
+
+    /**
+     * 预热云崽运行时用户初始化（compat.runtime_user）：让第一条消息不必等动态 import。
+     *
+     * **必须放在插件导入结束之后**：genshin 的 model/gsCfg.js（import `#miao.models`）、
+     * model/db/BaseModel.js（顶层 `Data.createDir(...)`，import `#miao`）与 miao 的模块图互相纠缠，
+     * 提前 import 会和并发加载的插件抢求值顺序，触发 `Cannot access 'Data' before initialization`
+     * （会让插件整体加载失败）。放在这里时 genshin 作为插件已加载完，几乎都是缓存命中。
+     */
+    if (cfg.getCompat().runtime !== false && cfg.getCompat().runtime_user !== false)
+      await Runtime.warmup().catch((err: any) =>
+        util.makeLog('debug', ['运行时用户初始化预热失败', err], 'Runtime'),
+      )
 
     /** 加载阶段结束：此后才就绪的插件（超时后才 import 完）会被自动补进分发 */
     this.loaded = true
