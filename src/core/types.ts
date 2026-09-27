@@ -150,7 +150,14 @@ export interface PluginEntry {
   /** 来源文件 key，如 system/add.js */
   key: string
   name: string
-  priority: number
+  /**
+   * 插件声明的优先级，升序匹配（小的先）。
+   *
+   * 允许 undefined：插件是任意外部对象，漏传 / 显式传 undefined 都可能发生
+   * （实测占位、降级类最容易漏）。排序时由 loader 兜底成默认值，
+   * 这里如实标注，避免调用方以为拿到的一定是数字。
+   */
+  priority: number | undefined
   namespace: string
   /**
    * 首次加载的顺序号（重载后不变）。
