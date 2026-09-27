@@ -128,11 +128,15 @@ const ambiguous = makeEvent('#更新plugin')
 const ambUp = new Update(ambiguous.e)
 ambUp.e = ambiguous.e
 check(
-  'getPlugin 多个候选时保留「匹配到多个插件」提示，但同样不抢先回复',
+  'getPlugin 多个候选时直接回复候选列表（"有哪些插件"提示，更新不执行）',
   (await ambUp.getPlugin()) === false &&
-    ambiguous.sent.length === 0 &&
-    /匹配到多个插件/.test(ambiguous.e.__pluginHint || ''),
-  ambiguous.e.__pluginHint,
+    ambiguous.sent.some(m => m.includes('匹配到多个插件') && m.includes('miao-plugin')),
+  ambiguous.sent.join(' | ') || '（无回复）',
+)
+check(
+  '多候选已当面回复，不再挂 e.__pluginHint（避免框架重复补发）',
+  !ambiguous.e.__pluginHint,
+  ambiguous.e.__pluginHint || '(未设置)',
 )
 
 /* ---- 1b. `#更新xxx` 前缀的插件指令不能被本体应答 ----

@@ -78,11 +78,14 @@ export default class Update extends JiuLiPlugin {
   /**
    * 把名字解析成 plugins/ 下的目录名；空串表示框架本体，false 表示没找到
    *
-   * 宽松匹配：`#更新ICQQ` 能命中 `Yunzai-ICQQ-Plugin`，`#更新ai` 能列出所有含 ai 的候选
+   * 宽松匹配：`#更新ICQQ` 能命中 `Yunzai-ICQQ-Plugin`，`#更新qqbot` 会列出所有含 qqbot 的候选
    *
-   * 命中不了 / 匹配到多个时**不在这里回复**，只把提示挂在 `e.__pluginHint` 上：
-   * 规则 `^#更新` 天然会命中 `#更新抽卡记录` 这类插件指令（逍遥、miao…），
-   * 本体一旦自己应答就等于把插件指令截胡了 —— 提示交给框架在「所有插件都没接手」时补发。
+   * 两种情况分开处理：
+   * - **匹配到多个**：直接回复候选列表（用户要的就是"有哪些插件"），更新本身不执行；
+   *   仍然返回 false —— 后面的插件照常能拿到这条指令，本体不抢。
+   * - **一个都没匹配**：不回复，只把提示挂到 `e.__pluginHint`（由框架在所有插件都没接手时补发）。
+   *   规则 `^#更新` 天然会命中 `#更新抽卡记录` 这类插件指令（逍遥、miao…），
+   *   本体一旦应答就等于把插件指令截胡了。
    */
   async getPlugin(name) {
     const plugin = String(
@@ -104,7 +107,8 @@ export default class Update extends JiuLiPlugin {
     })
     if (hits.length === 1) return (this.typeName = hits[0])
     if (hits.length > 1) {
-      this.e.__pluginHint = `「${plugin}」匹配到多个插件：\n${hits.join(' · ')}\n请写明完整目录名`
+      /** 多个候选：直接回答"有哪些插件"（更新不执行），但仍返回 false 让后面的插件照常接手 */
+      await this.reply(`「${plugin}」匹配到多个插件：\n${hits.join(' · ')}\n请写明完整目录名`)
       return false
     }
     this.e.__pluginHint = `plugins/ 下没有「${plugin}」，可用 #插件列表 查看`
