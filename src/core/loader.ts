@@ -1355,11 +1355,29 @@ class PluginsLoader {
   watchPlugins() {
     if (this.watcher['#root']) return
     const root = `./${this.dir}`
-    /** 忽略 node_modules/.git：clone 第三方插件时避免扫描上万文件导致重载风暴 */
+    /**
+     * 忽略 node_modules/.git：clone 第三方插件时避免扫描上万文件导致重载风暴。
+     *
+     * 还要**在扫描阶段就把非 .js 文件挡掉**：chokidar 4 会给树里每个文件都建一个
+     * inotify watch（实测 4 目录 / 60 文件的树 = 64 个 watch），而下面的处理函数
+     * 只认 .js（见 processEvent），图片 / 资源被 watch 了也永远不会触发重载。
+     * 代价却是实打实的：本机 plugins/ 下 depth≤4 有 4000+ 个非 .js 文件
+     * （png / jpg / sample / yaml…），对应上百 MB 常驻内存；而
+     * `GloryOfKings-Plugin/data/imgCache` 这类缓存目录还会**随使用增长**
+     * （每缓存一张远程图就多一个 watch，实测已 200MB+），等于跑得越久内存越高。
+     *
+     * 用 ignored 函数而不是往数组里加 `*.png` 之类的模式：扩展名是开放的，
+     * 只放行 `.js` 才不会漏。stats 只对**文件**给出（chokidar 的 filterPath /
+     * filterDir 两条路），目录是 undefined —— 目录必须放过，否则扫不进去。
+     * 与 chokidar README 的示例写法一致：
+     * `ignored: (f, stats) => stats?.isFile() && !f.endsWith('.js')`
+     */
+    const ignoredPatterns = [/[\\/]node_modules[\\/]/, /[\\/]\.git[\\/]/, /[\\/]\.git$/, /[\\/]temp[\\/]/]
     const watcher = chokidar.watch(root, {
       depth: 4,
       ignoreInitial: true,
-      ignored: [/[\\/]node_modules[\\/]/, /[\\/]\.git[\\/]/, /[\\/]\.git$/, /[\\/]temp[\\/]/],
+      ignored: (p: string, stats?: any) =>
+        ignoredPatterns.some(re => re.test(p)) || (stats?.isFile?.() === true && !p.endsWith('.js')),
     })
     const Bot = (globalThis as any).Bot
 
