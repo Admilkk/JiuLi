@@ -45,6 +45,25 @@ async function preloadMiao() {
   }
 }
 
+/**
+ * priority 缺失时的兜底值，与 plugin 基类的默认值保持一致。
+ * 插件漏传 priority（或占位/降级类没设这个字段）时用它，避免排序比较函数算出 NaN。
+ */
+const DEFAULT_PRIORITY = 5000
+
+/**
+ * 把插件的 priority 规整成可参与比较的数字。
+ *
+ * 只兜「会算出 NaN」的输入：`undefined`（漏传 / 占位类没设）、`NaN`、以及非 number。
+ * `-Infinity` / `Infinity` 是云崽生态的正常写法（系统插件大量用 `-Infinity`），原样保留 ——
+ * 所以这里不能用 `Number.isFinite` 判断。
+ *
+ * 导出给测试复用，保证「测试断言的排序口径」与「框架实际排序口径」是同一套。
+ */
+export function priorityRank(n: unknown): number {
+  return typeof n === 'number' && !Number.isNaN(n) ? n : DEFAULT_PRIORITY
+}
+
 /** 各适配器返回格式不一：{ error: [] } 空数组表示成功，也可能返回 Error 实例或字符串 */
 function hasSendError(res: any): boolean {
   if (!res || typeof res !== 'object') return false
@@ -331,9 +350,24 @@ class PluginsLoader {
    *
    * 注意 `-Infinity - -Infinity = NaN`，而 NaN 是假值，`||` 会兜到顺序号比较 ——
    * 正好是想要的「同优先级按加载顺序」。
+   *
+   * ⚠️ 但 `undefined - 数字` 也是 NaN，而它和「同为 -Infinity」不是一回事：
+   * 一旦有条目的 priority 是 undefined（插件漏传、或占位/降级类没设这个字段），
+   * 该条目与任何人比较都会退化成按 order 比 —— 比较函数**不再满足传递性**
+   * （实测 `卸载枫叶(-1e42) < placeholder(undefined) < atme更新(-Infinity)`，
+   * 但 `cmp(卸载枫叶, atme更新) = Infinity`）。V8 的 sort 在比较函数不一致时
+   * 结果不可预测，会把**整张表的顺序打乱**，表现为「某条指令被别的插件抢走」，
+   * 而且没有任何报错。实测一个 undefined 条目能让 317 条里的 304 条错位。
+   *
+   * 所以这里先把 priority 规整成数字：只兜「会算出 NaN」的输入（undefined / NaN /
+   * 非 number），统一按基类默认值 5000 处理，再排序。
+   * ⚠️ 不能用 `Number.isFinite` —— 那会把生态惯例的 `-Infinity` 一起兜掉，
+   * 而 `-Infinity` 是正常用法（系统插件大量使用），必须原样保留。
    */
   private sortPriority() {
-    this.priority.sort((a, b) => a.priority - b.priority || (a.order ?? 0) - (b.order ?? 0))
+    this.priority.sort(
+      (a, b) => priorityRank(a.priority) - priorityRank(b.priority) || (a.order ?? 0) - (b.order ?? 0),
+    )
   }
 
   /** 候选插件：事件索引命中桶 + 通配桶 */
