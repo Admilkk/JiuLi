@@ -37,7 +37,8 @@
 
 **重载风暴熔断**：同一插件 60 秒内被重载 ≥5 次，框架会暂停它的重载监听并打一条 ERROR 日志
 （每次重载都会永久占用一张模块图，ESM 缓存不释放旧图，顶着循环跑几十秒必 OOM）；
-修好根因后发 `#重载` 恢复监听。阈值可调：`config/config/jiuli.yaml → perf.reload_limit /
+修好根因后发 `#重载 <插件名>` 强制刷新即恢复监听（无参数的 `#重载` 只补漏，不解除熔断），
+内存已经涨上去就直接 `#重启`。阈值可调：`config/config/jiuli.yaml → perf.reload_limit /
 perf.reload_window`（`reload_limit: 0` 关闭熔断，只保留上面的结构判定）。
 
 ## 写自己的插件

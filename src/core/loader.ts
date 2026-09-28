@@ -183,14 +183,7 @@ class PluginsLoader {
       /** 整目录刷新：代数 +1，所有插件的模块图都换新 */
       bumpModuleGeneration()
       /** 手动 #重载 同时解除重载风暴熔断 */
-      if (this.pausedReload.size) {
-        util.makeLog(
-          'mark',
-          `已恢复重载监听：${[...this.pausedReload].map(k => logger.cyan(k)).join(' · ')}`,
-          'Plugin',
-        )
-        this.pausedReload.clear()
-      }
+      this.resumeReload()
       this.reloadMarks.clear()
     }
     if (this.priority.length) return
@@ -1424,9 +1417,31 @@ class PluginsLoader {
       `插件 ${logger.cyan(key)} 在 ${windowSec} 秒内被重载了 ${marks.length} 次，已**暂停它的重载监听**（防重载风暴）\n` +
         '  常见原因：插件在加载时会改写自己目录下的 .js（例如 miao 的 config/cfg.js），形成"改文件 → 重载 → 又改文件"的自激循环；\n' +
         '  每轮重载都会永久占用一张模块图（ESM 缓存不释放），顶着循环跑几十秒就能把内存打爆。\n' +
-        '  处理：修好根因后发 #重载 恢复监听；内存已经涨上去的话直接 #重启。',
+        '  处理：修好根因后发 #重载 <插件名> 强制刷新（会自动恢复监听）；内存已经涨上去的话直接 #重启。',
       'Plugin',
     )
+  }
+
+  /** 当前因重载风暴被暂停监听的插件 key（#重载 提示用） */
+  get pausedReloadList(): string[] {
+    return [...this.pausedReload]
+  }
+
+  /**
+   * 解除重载熔断：手动 `#重载 <插件名>` 是明确的用户动作，理应重新监听。
+   *
+   * 为什么不放在 changePlugin 里自动清：watcher 触发的重载也走 changePlugin，
+   * 一进一出就把计数清了，熔断永远不会触发。所以只由指令层显式调用。
+   */
+  resumeReload(key?: string) {
+    const targets = key ? (this.pausedReload.has(key) ? [key] : []) : [...this.pausedReload]
+    if (!targets.length) return false
+    for (const k of targets) {
+      this.pausedReload.delete(k)
+      this.reloadMarks.delete(k)
+    }
+    util.makeLog('mark', `已恢复重载监听：${targets.map(k => logger.cyan(k)).join(' · ')}`, 'Plugin')
+    return true
   }
 
   /**

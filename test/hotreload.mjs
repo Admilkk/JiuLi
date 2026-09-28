@@ -494,6 +494,24 @@ export default class RoutePlugin extends JiuLiPlugin {
   await loader.load(true)
   check('发 #重载 后解除熔断', loader.pausedReload?.has(key) === false, `pausedReload=${loader.pausedReload?.has(key)}`)
 
+  /** b2) 单插件恢复：`#重载 <插件名>` 走 resumeReload(key)，只解除这一个 */
+  for (let i = 0; i < 5; i++) {
+    await loader.changePlugin(key)
+    loader.noteReload?.(key)
+    await sleep(200)
+  }
+  const pausedBefore = loader.pausedReload?.has(key) === true
+  loader.resumeReload?.(key)
+  check(
+    'resumeReload(key) 解除该插件熔断（#重载 <插件名> 用的就是它）',
+    pausedBefore && loader.pausedReload?.has(key) === false,
+    `before=${pausedBefore} after=${loader.pausedReload?.has(key)}`,
+  )
+  changes = 0
+  fs.writeFileSync(utilPath, "export function label() {\n  return 'v4'\n}\n")
+  await sleep(4500)
+  check('恢复后改文件又能重载生效', changes === 1 && (await ask()).includes('风暴 v4'), `changes=${changes}`)
+
   /** c) 阈值可配置：改小 reload_limit 就按新阈值熔断（不写死 5/60） */
   const cfg = (await import('../lib/core/config/index.js')).default
   fs.writeFileSync('test/.tmp-config/jiuli.yaml', 'perf:\n  reload_limit: 2\n  reload_window: 60\n')

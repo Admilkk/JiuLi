@@ -8,6 +8,8 @@ import { PluginsLoader } from 'jiuli/core'
  * 本指令只用于两种情况：
  *   #重载           补漏：把"磁盘上有、但还没加载"的插件加载进来（如刚 clone 完/刚补装依赖）
  *   #重载 状态      强制刷新：重载名字匹配的插件（含已加载的，用于 file_watch 关闭或状态异常时）
+ *
+ * 强制刷新同时会**解除该插件的重载风暴熔断**（插件自激重载被暂停监听时，用它恢复）。
  */
 export default class Reload extends JiuLiPlugin {
   constructor() {
@@ -37,10 +39,15 @@ export default class Reload extends JiuLiPlugin {
     const toReload = keyword ? loaded.filter(k => k.includes(keyword)) : []
 
     if (!toLoad.length && !toReload.length) {
+      /** 有插件因重载风暴被暂停监听时，顺手报出来，避免用户以为它能自动重载 */
+      const paused = PluginsLoader.pausedReloadList || []
+      const pausedTip = paused.length
+        ? `\n注意：${paused.join('、')} 因短时间内重载过多次被暂停了重载监听（防重载风暴），改完根因后用 #重载 <插件名> 恢复`
+        : ''
       return this.reply(
         keyword
-          ? `没有匹配「${keyword}」的插件`
-          : `插件均已加载（共 ${loaded.length} 个）· 修改文件由热重载自动生效；需要强制刷新请用 #重载 <插件名>`,
+          ? `没有匹配「${keyword}」的插件${pausedTip}`
+          : `插件均已加载（共 ${loaded.length} 个）· 修改文件由热重载自动生效；需要强制刷新请用 #重载 <插件名>${pausedTip}`,
         true,
       )
     }
@@ -57,10 +64,13 @@ export default class Reload extends JiuLiPlugin {
       const failed = []
 
       for (const key of toLoad) {
+        PluginsLoader.resumeReload(key)
         if (await PluginsLoader.reloadKey(key)) ok++
         else failed.push(key)
       }
       for (const key of toReload) {
+        /** 强制刷新 = 明确的用户动作，顺手解除该插件的重载熔断 */
+        PluginsLoader.resumeReload(key)
         if (await PluginsLoader.changePlugin(key)) ok++
         else failed.push(key)
       }
