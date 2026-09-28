@@ -643,6 +643,26 @@ export default class RoutePlugin extends JiuLiPlugin {
     `priority 条目 ${loader.priority.filter(i => i.key === 'hotreload-selfwrite').length}`,
   )
 
+  /**
+   * 少见布局：扁平插件目录里再套目录（example/ 没有 index.js，却出现 example/xxx/apps/y.js）。
+   * 这种文件不算任何插件的（getPlugins 也不加载它），删掉时**不能**去卸载 example 下的其它插件。
+   */
+  const flatDir = path.join(PLUGINS_DIR, 'example', 'nested-flat', 'apps')
+  fs.mkdirSync(flatDir, { recursive: true })
+  fs.writeFileSync(path.join(flatDir, 'y.js'), 'export const y = 1\n')
+  await sleep(5000)
+  const beforeFlat = loader.priority.filter(i => String(i.key).startsWith('example/')).length
+  fs.rmSync(path.join(flatDir, 'y.js'))
+  await sleep(5000)
+  const afterFlat = loader.priority.filter(i => String(i.key).startsWith('example/')).length
+  check(
+    '删「扁平目录里再套目录」的文件不会误卸载同目录的其它插件',
+    beforeFlat > 0 && beforeFlat === afterFlat,
+    `example/ 下的插件条目 ${beforeFlat} → ${afterFlat}`,
+  )
+  fs.rmSync(path.join(PLUGINS_DIR, 'example', 'nested-flat'), { recursive: true, force: true })
+  await sleep(3000)
+
   loader.changePlugin = orig2
   fs.rmSync(dir, { recursive: true, force: true })
   await sleep(3000)

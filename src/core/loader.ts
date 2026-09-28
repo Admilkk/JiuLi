@@ -1374,8 +1374,32 @@ class PluginsLoader {
     return this.inertFiles.has(key)
   }
 
+  /**
+   * 找出这个文件真正属于哪个**已加载**的插件（用于热重载分类）。
+   *
+   * `keyOf` 的规则是「两层算自己、更深归第一层」，对标准布局（`plugins/<插件>/apps/x.js`）没错；
+   * 但遇到「扁平目录里再套目录」——`plugins/example/devdrill/index.js`，而 `example/` 本身没有
+   * index.js（它是"加载目录下所有 js"的形态）—— 就会算成 `example`，于是改 / 删一个文件会动到
+   * 整个 `example` 目录下的所有插件。这里在已加载的 key 里挑最长的祖先 key 兜住这类布局。
+   */
+  private ownerKeyOf(rel: string, fallback: string): string {
+    let best = ''
+    const consider = (key: string) => {
+      if (key.length > best.length && (rel === key || rel.startsWith(`${key}/`))) best = key
+    }
+    for (const key of this.pluginCountMap.keys()) consider(key)
+    for (const i of this.priority) consider(i.key)
+    return best || fallback
+  }
+
   private isLoaded(key: string) {
-    return this.pluginCountMap.has(key) || this.priority.some(i => i.key === key)
+    /**
+     * 注意用**计数 > 0**而不是 `has`：importPlugin 一进来就 `pluginCountMap.set(name, 0)`，
+     * 加载失败（例如 key 指向不存在的 index.js）时会留下一个 0 的记录。
+     * 用 `has` 判断的话，这种"失败的 key"会被当成已加载，之后删它下面的文件就会去
+     * 卸载一个根本不存在的插件（实测把 example 目录下的变更全算到 key `example` 上）。
+     */
+    return (this.pluginCountMap.get(key) ?? 0) > 0 || this.priority.some(i => i.key === key)
   }
 
   /** 文件是否存在（删除事件里判断"插件目录还在不在"） */
@@ -1607,23 +1631,31 @@ class PluginsLoader {
       }
       const key = this.keyOf(rel)
       if (!key) return
+      /** 真正归属的插件（keyOf 对「扁平目录里再套目录」会给成父目录，这里兜一下） */
+      const owner = this.ownerKeyOf(rel, key)
 
       if (action === 'unlink') {
-        if (!this.isLoaded(key)) return
         /**
          * 删的是**嵌套文件**（apps/x.js、lib/y.js）时不能当成"整个插件被删"：
          * 插件目录还在，卸载整个插件会让用户的插件直接失联报错。
          * 只有当入口（目录插件的 index.js / 文件型插件自己的 .js）没了才算删除。
          */
-        const entry = key.endsWith('.js') ? key : `${key}/index.js`
-        if (rel !== entry && (await this.fileExists(`./${this.dir}/${entry}`))) {
+        const entry = owner.endsWith('.js') ? owner : `${owner}/index.js`
+        const entryExists = await this.fileExists(`./${this.dir}/${entry}`)
+        /** 既不是入口、又对不上任何插件入口：这种少见布局（扁平目录里再套目录）不下手，别误删别人的插件 */
+        if (rel !== entry && !entryExists) {
+          util.makeLog('debug', `插件文件已删除（找不到对应插件入口，忽略）· ${rel}`, 'Plugin')
+          return
+        }
+        if (!this.isLoaded(owner)) return
+        if (rel !== entry) {
           util.makeLog('mark', `插件文件已删除 → 重载 · ${logger.cyan(rel)}（插件目录仍在，不卸载整个插件）`, 'Plugin')
-          await this.changePlugin(key)
-          this.noteReload(key, null)
+          await this.changePlugin(owner)
+          this.noteReload(owner, null)
           return
         }
         util.makeLog('mark', `插件已删除 → 卸载 · ${logger.cyan(rel)}`, 'Plugin')
-        await this.unloadPlugin(key)
+        await this.unloadPlugin(owner)
         return
       }
 
@@ -1634,6 +1666,18 @@ class PluginsLoader {
       }
 
       /**
+       * 归属到的 key 还没加载、而且它的入口文件也不在磁盘上（少见布局：扁平插件目录里再套目录）：
+       * 这个文件不属于任何插件，硬按 key 去 import 只会刷一条加载失败，直接放着不动。
+       */
+      if (owner !== rel && !this.isLoaded(owner)) {
+        const ownerEntry = owner.endsWith('.js') ? owner : `${owner}/index.js`
+        if (!(await this.fileExists(`./${this.dir}/${ownerEntry}`))) {
+          util.makeLog('debug', `插件文件变化（归属不到已存在的插件，忽略）· ${rel}`, 'Plugin')
+          return
+        }
+      }
+
+      /**
        * 插件自己在加载时改写的文件：**不重载**。
        *
        * 这是自激循环的通用兜底（结构判定只覆盖 config/data 目录，代码文件得靠这条）：
@@ -1641,12 +1685,12 @@ class PluginsLoader {
        * 每轮永久泄漏一张模块图，几十秒 OOM。跳过这一次，插件不会再加载，循环自然断掉。
        */
       const writer = await this.machineWriteOwner(file)
-      if (writer && writer === key) {
+      if (writer && writer === owner) {
         const first = !this.selfWriteWarned.has(rel)
         this.selfWriteWarned.add(rel)
         util.makeLog(
           first ? 'error' : 'debug',
-          `插件 ${logger.cyan(key)} 在加载时改写了 ${logger.cyan(rel)} → 跳过本次重载（防自激循环）\n` +
+          `插件 ${logger.cyan(owner)} 在加载时改写了 ${logger.cyan(rel)} → 跳过本次重载（防自激循环）\n` +
             '  插件不该在自己的模块顶层写回代码 / 配置文件：这一写会触发重载、重载又写一遍。\n' +
             '  处理：把写文件挪到运行期（指令或定时任务里），或存成 config/data 下的纯数据文件（如 .json / .yaml）。',
           'Plugin',
@@ -1655,12 +1699,12 @@ class PluginsLoader {
       }
 
       /** 熔断中的插件不再重载（等 #重载 <插件名> 恢复） */
-      if (this.pausedReload.has(key)) {
-        util.makeLog('debug', `插件 ${key} 的重载监听已暂停（重载风暴熔断中），发 #重载 <插件名> 可恢复`, 'Plugin')
+      if (this.pausedReload.has(owner)) {
+        util.makeLog('debug', `插件 ${owner} 的重载监听已暂停（重载风暴熔断中），发 #重载 <插件名> 可恢复`, 'Plugin')
         return
       }
 
-      const loaded = this.isLoaded(key)
+      const loaded = this.isLoaded(owner)
       util.makeLog(
         'mark',
         `插件${action === 'add' ? '新增' : '修改'} → ${loaded ? '重载' : '加载'} · ${logger.cyan(rel)}${
@@ -1669,9 +1713,9 @@ class PluginsLoader {
         'Plugin',
       )
       if (loaded) {
-        await this.changePlugin(key)
-        this.noteReload(key, writer)
-      } else await this.loadKey(key)
+        await this.changePlugin(owner)
+        this.noteReload(owner, writer)
+      } else await this.loadKey(owner)
     }
 
     const flushEvents = async () => {
