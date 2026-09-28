@@ -119,10 +119,20 @@ class PluginsLoader {
   msgThrottle: Record<string, boolean> = {}
 
   watcher: Record<string, any> = {}
-  /** 重载风暴熔断：同一插件在窗口内的重载时刻表 */
+  /**
+   * 重载风暴熔断：只统计**机器自激**的重载时刻表（人工改文件不计，见 noteReload）。
+   * 开发时一分钟里存十几次代码是常态，不该被当成风暴；插件自己边加载边改写文件才是。
+   */
   private reloadMarks = new Map<string, number[]>()
-  /** 被熔断的插件（暂停其重载监听，`#重载` 恢复） */
+  /** 被熔断的插件（暂停其重载监听，`#重载 <插件名>` 恢复） */
   private pausedReload = new Set<string>()
+  /** 所有重载（含人工）的时间戳，只用于"这频率不像人在改文件"的告警 */
+  private globalReloadMarks: number[] = []
+  private lastGlobalRateWarn = 0
+  /** 各插件最近一次「模块求值窗口」：文件 mtime 落在这里 = 那次加载自己写出来的 */
+  private loadWindows = new Map<string, { start: number; end: number }>()
+  /** 已就"自激改写"告警过的文件（首次 error，之后 debug，别刷屏） */
+  private selfWriteWarned = new Set<string>()
   taskMap = new Map<string, Set<any>>()
   pluginCountMap = new Map<string, number>()
   pluginCount = 0
@@ -515,6 +525,11 @@ class PluginsLoader {
       else if (!success) this.inertFiles.delete(file.name)
     }
     this.load_time[file.name] = Date.now() - start_time
+    /**
+     * 记下这次模块求值的起止时间：插件若在自己的顶层改写文件，那个文件的 mtime
+     * 必然落在这个窗口里 —— 是 machineWriteOwner() 区分"机器自激"与"人工编辑"的依据。
+     */
+    this.loadWindows.set(file.name, { start: start_time, end: Date.now() })
     /** 加载阶段结束后才就绪（超过 plugin_load_timeout）：补进分发，省得用户手动重载 */
     if (success && this.loaded) this.lateAttach(file)
     return success
@@ -798,12 +813,17 @@ class PluginsLoader {
         util.makeLog('debug', `未命中插件 · ${scene} · ${util.truncate(e.msg || util.describeMsg(e.message))}`, 'Msg')
 
       /**
-       * 命中指令型规则却无插件响应时提示一次，避免静默无响应被误认为框架故障
+       * 命中指令型规则却无插件响应时提示一次，避免静默无响应被误认为框架故障。
+       *
+       * **只对指令前缀开头的消息提示**（默认 `#`，见 bot.yaml → no_handler_tip_prefix）：
+       * 普通聊天经常被插件的宽泛规则（`^.+$` 之类）匹配到，插件本来就不该回话，
+       * 提示它只会变成"聊一句机器人就回一句没响应"，比不提示更烦人。
        */
       if (
         commandMatched.length &&
         !e.__replied &&
         cfg.bot.no_handler_tip !== false &&
+        this.looksLikeCommand(e.msg) &&
         e.message &&
         e.msg
       ) {
@@ -865,6 +885,25 @@ class PluginsLoader {
       }
     }
     return true
+  }
+
+  /**
+   * 这条消息看起来像"用户在敲指令"吗（默认要求 `#` 前缀）。
+   *
+   * `no_handler_tip` 只在这种消息上提示：普通聊天会被插件的宽泛规则匹配到，
+   * 插件本来就不回话，再补一句"没有响应"反而像机器人坏了。前缀可在
+   * `bot.yaml → no_handler_tip_prefix` 里改（逗号分隔多个，写 `*` 表示不限制前缀）。
+   */
+  private looksLikeCommand(msg: unknown): boolean {
+    const raw = String(msg ?? '')
+    const conf = (cfg.bot as any).no_handler_tip_prefix
+    const prefix = conf === undefined || conf === null || conf === '' ? '#' : String(conf)
+    if (prefix === '*' || prefix === 'any' || prefix === 'all') return true
+    return prefix
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .some(p => raw.startsWith(p))
   }
 
   /** 事件表达式与实际事件逐段比对，支持 * 通配 */
@@ -1339,6 +1378,16 @@ class PluginsLoader {
     return this.pluginCountMap.has(key) || this.priority.some(i => i.key === key)
   }
 
+  /** 文件是否存在（删除事件里判断"插件目录还在不在"） */
+  private async fileExists(p: string): Promise<boolean> {
+    try {
+      await fs.access(p)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /** 按 key 加载；已加载则重载 */
   async reloadKey(key: string) {
     if (this.isLoaded(key)) return this.changePlugin(key)
@@ -1391,36 +1440,93 @@ class PluginsLoader {
   }
 
   /**
-   * 记录一次重载；同一插件短时间内反复重载就**熔断**（暂停它的重载监听）
+   * 记录一次重载；**机器自激**的重载短时间内反复出现就熔断（暂停它的重载监听）
    *
-   * 上面那条"结构判定"挡住的是配置/数据文件；这里兜底挡"插件自己改写代码文件"之类的循环：
-   * 顶着熔断继续循环的话，每轮都会永久泄漏一张模块图，几十秒就能把内存打爆。
+   * 只统计"文件是插件自己在加载时写出来的"那种重载：
+   * - 人工在编辑器里改文件（mtime 落在所有求值窗口之外）**不计入** ——
+   *   开发者一分钟里存十几次代码是常态，被当成风暴暂停掉就没法调插件了；
+   * - 插件边加载边改写文件（miao 的 config/cfg.js 就是）才算，因为这才是会 OOM 的自激循环：
+   *   每轮重载都会永久占用一张模块图（ESM 缓存不释放），顶着循环跑几十秒就能打爆内存。
+   *
+   * 另外还有一条"全局频率"兜底：任何来源的重载一分钟超过 reload_global_limit 次，
+   * 说明这频率不像人在改文件，打一条 ERROR 提醒（不暂停，避免误伤批量格式化之类）。
    */
-  private noteReload(key: string) {
-    // 阈值走配置，方便按机器/插件调松紧；配 0 表示关掉熔断（只留上面的结构判定）
+  private noteReload(key: string, machineOwner?: string | null) {
+    // 阈值走配置，方便按机器/插件调松紧；配 0 表示关掉熔断（只留结构判定）
     const perf: any = cfg.getPerf()
-    const limit = Math.max(0, Number(perf.reload_limit ?? 5) || 0)
     const windowSec = Math.max(1, Number(perf.reload_window ?? 60) || 60)
-    if (!limit) return
-
+    const limit = Math.max(0, Number(perf.reload_limit ?? 5) || 0)
     const windowMs = windowSec * 1000
     const now = Date.now()
-    const marks = (this.reloadMarks.get(key) || []).filter(t => now - t < windowMs)
-    marks.push(now)
-    this.reloadMarks.set(key, marks)
-    if (marks.length < limit) return
 
-    this.pausedReload.add(key)
-    this.reloadMarks.delete(key)
-    util.makeLog(
-      'error',
-      `插件 ${logger.cyan(key)} 在 ${windowSec} 秒内被重载了 ${marks.length} 次，已**暂停它的重载监听**（防重载风暴）\n` +
-        '  常见原因：插件在加载时会改写自己目录下的 .js（例如 miao 的 config/cfg.js），形成"改文件 → 重载 → 又改文件"的自激循环；\n' +
-        '  每轮重载都会永久占用一张模块图（ESM 缓存不释放），顶着循环跑几十秒就能把内存打爆。\n' +
-        '  处理：修好根因后发 #重载 <插件名> 强制刷新（会自动恢复监听）；内存已经涨上去的话直接 #重启。',
-      'Plugin',
-    )
+    this.globalReloadMarks = this.globalReloadMarks.filter(t => now - t < windowMs)
+    this.globalReloadMarks.push(now)
+
+    if (machineOwner && limit) {
+      const marks = (this.reloadMarks.get(key) || []).filter(t => now - t < windowMs)
+      marks.push(now)
+      this.reloadMarks.set(key, marks)
+      if (marks.length >= limit) {
+        this.pausedReload.add(key)
+        this.reloadMarks.delete(key)
+        util.makeLog(
+          'error',
+          `插件 ${logger.cyan(key)} 在 ${windowSec} 秒内自激重载了 ${marks.length} 次（文件是它自己在加载时改写的），已**暂停它的重载监听**\n` +
+            '  常见原因：插件在模块顶层把配置 / 数据写回自己目录下的 .js（例如 miao 的 config/cfg.js），形成"改文件 → 重载 → 又改文件"的循环；\n' +
+            '  每轮重载都会永久占用一张模块图（ESM 缓存不释放），顶着循环跑几十秒就能把内存打爆。\n' +
+            '  处理：修好根因后发 #重载 <插件名> 强制刷新（会自动恢复监听）；内存已经涨上去的话直接 #重启。\n' +
+            '  阈值可调：config/config/jiuli.yaml → perf.reload_limit / perf.reload_window（0 关闭熔断）。',
+          'Plugin',
+        )
+        return
+      }
+    }
+
+    /** 全局兜底：只告警不暂停（人工改文件不该被拦，批量格式化也可能一次改很多插件） */
+    const globalLimit = Math.max(0, Number(perf.reload_global_limit ?? 12) || 0)
+    if (globalLimit && this.globalReloadMarks.length >= globalLimit && now - this.lastGlobalRateWarn > 60_000) {
+      this.lastGlobalRateWarn = now
+      const busiest = [...this.reloadMarks.entries()]
+        .map(([k, v]) => [k, v.filter(t => now - t < windowMs).length] as [string, number])
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .filter(([, n]) => n > 1)
+        .map(([k, n]) => `${k}(${n} 次)`)
+      util.makeLog(
+        'error',
+        `一分钟内热重载 ${this.globalReloadMarks.length} 次，远超人工改文件的频率${busiest.length ? ` · 反复重载：${busiest.join(' · ')}` : ''}\n` +
+          '  如果内存持续上涨、或某个插件的内容被反复改写：查它是不是在加载时写自己的文件（改好即自愈）；\n' +
+          '  也可以临时 config/config/bot.yaml → file_watch: false 关掉热重载，或调小 perf.reload_limit。',
+        'Plugin',
+      )
+    }
   }
+
+  /**
+   * 这个文件的修改时间是"机器写的"吗：落在最近某次插件模块求值的窗口内。
+   *
+   * 插件在模块顶层改写文件时，写入必然发生在求值期间 → mtime 落在窗口里；
+   * 人在编辑器里保存，mtime 落在窗口里（毫秒级）的概率极低 —— 这就是区分
+   * "开发者连续改代码" 与 "插件自激重载风暴" 的依据。
+   *
+   * @returns 窗口属于哪个插件（key）；null = 没落在任何窗口里（视为人工改动）
+   */
+  private async machineWriteOwner(fullPath: string): Promise<string | null> {
+    if (!this.loadWindows.size) return null
+    const cutoff = Date.now() - 10_000
+    for (const [k, w] of this.loadWindows) if (w.end < cutoff) this.loadWindows.delete(k)
+    if (!this.loadWindows.size) return null
+    let mtime: number
+    try {
+      mtime = (await fs.stat(fullPath)).mtimeMs
+    } catch {
+      return null
+    }
+    for (const [owner, w] of this.loadWindows)
+      if (mtime >= w.start - 50 && mtime <= w.end + 50) return owner
+    return null
+  }
+
 
   /** 当前因重载风暴被暂停监听的插件 key（#重载 提示用） */
   get pausedReloadList(): string[] {
@@ -1440,6 +1546,8 @@ class PluginsLoader {
       this.pausedReload.delete(k)
       this.reloadMarks.delete(k)
     }
+    /** 让"自激改写"的 error 提示重新出现一次，方便确认根因还没修 */
+    this.selfWriteWarned.clear()
     util.makeLog('mark', `已恢复重载监听：${targets.map(k => logger.cyan(k)).join(' · ')}`, 'Plugin')
     return true
   }
@@ -1502,6 +1610,18 @@ class PluginsLoader {
 
       if (action === 'unlink') {
         if (!this.isLoaded(key)) return
+        /**
+         * 删的是**嵌套文件**（apps/x.js、lib/y.js）时不能当成"整个插件被删"：
+         * 插件目录还在，卸载整个插件会让用户的插件直接失联报错。
+         * 只有当入口（目录插件的 index.js / 文件型插件自己的 .js）没了才算删除。
+         */
+        const entry = key.endsWith('.js') ? key : `${key}/index.js`
+        if (rel !== entry && (await this.fileExists(`./${this.dir}/${entry}`))) {
+          util.makeLog('mark', `插件文件已删除 → 重载 · ${logger.cyan(rel)}（插件目录仍在，不卸载整个插件）`, 'Plugin')
+          await this.changePlugin(key)
+          this.noteReload(key, null)
+          return
+        }
         util.makeLog('mark', `插件已删除 → 卸载 · ${logger.cyan(rel)}`, 'Plugin')
         await this.unloadPlugin(key)
         return
@@ -1513,21 +1633,44 @@ class PluginsLoader {
         return
       }
 
-      /** 熔断中的插件不再重载（等 #重载 恢复） */
+      /**
+       * 插件自己在加载时改写的文件：**不重载**。
+       *
+       * 这是自激循环的通用兜底（结构判定只覆盖 config/data 目录，代码文件得靠这条）：
+       * 插件加载 → 顶层改文件 → watcher 事件 → 重载 → 又改文件 ……
+       * 每轮永久泄漏一张模块图，几十秒 OOM。跳过这一次，插件不会再加载，循环自然断掉。
+       */
+      const writer = await this.machineWriteOwner(file)
+      if (writer && writer === key) {
+        const first = !this.selfWriteWarned.has(rel)
+        this.selfWriteWarned.add(rel)
+        util.makeLog(
+          first ? 'error' : 'debug',
+          `插件 ${logger.cyan(key)} 在加载时改写了 ${logger.cyan(rel)} → 跳过本次重载（防自激循环）\n` +
+            '  插件不该在自己的模块顶层写回代码 / 配置文件：这一写会触发重载、重载又写一遍。\n' +
+            '  处理：把写文件挪到运行期（指令或定时任务里），或存成 config/data 下的纯数据文件（如 .json / .yaml）。',
+          'Plugin',
+        )
+        return
+      }
+
+      /** 熔断中的插件不再重载（等 #重载 <插件名> 恢复） */
       if (this.pausedReload.has(key)) {
-        util.makeLog('debug', `插件 ${key} 的重载监听已暂停（重载风暴熔断中），发 #重载 可恢复`, 'Plugin')
+        util.makeLog('debug', `插件 ${key} 的重载监听已暂停（重载风暴熔断中），发 #重载 <插件名> 可恢复`, 'Plugin')
         return
       }
 
       const loaded = this.isLoaded(key)
       util.makeLog(
         'mark',
-        `插件${action === 'add' ? '新增' : '修改'} → ${loaded ? '重载' : '加载'} · ${logger.cyan(rel)}`,
+        `插件${action === 'add' ? '新增' : '修改'} → ${loaded ? '重载' : '加载'} · ${logger.cyan(rel)}${
+          writer ? `（文件由插件 ${writer} 在加载时改写）` : ''
+        }`,
         'Plugin',
       )
       if (loaded) {
         await this.changePlugin(key)
-        this.noteReload(key)
+        this.noteReload(key, writer)
       } else await this.loadKey(key)
     }
 

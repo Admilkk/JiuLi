@@ -84,6 +84,20 @@ export class HookAfter extends JiuLiPlugin {
 `,
 )
 
+/** 模拟"宽泛规则命中普通聊天但插件本来就不回话"的插件（AI 聊天类常见写法） */
+fs.writeFileSync(
+  path.join(FIXTURE_DIR, 'chat-catchall.js'),
+  `export class chatCatchall extends plugin {
+  constructor() {
+    super({ name: '宽泛规则测试', dsc: 'test', event: 'message', rule: [{ reg: '^[\\s\\S]+$', fnc: 'noop' }] })
+  }
+  async noop() {
+    return false
+  }
+}
+`,
+)
+
 /** 模拟"插件内部自己判断主人、非主人静默 return false"的第三方插件写法 */
 fs.writeFileSync(
   path.join(FIXTURE_DIR, 'silent-deny.js'),
@@ -443,6 +457,17 @@ clear()
 emit({ type: 'message', group_id: '888777666', user_id: '10001', msg: '#静默拒绝' })
 await sleep(400)
 check('主人使用时不误报提示', json().includes('主人你好') && !json().includes('主人专属指令'))
+
+/**
+ * 普通聊天不该被"无响应提示"打扰：插件写 `^[\s\S]+$` 这种宽泛规则命中聊天是常态，
+ * 插件本来就不回话。提示只认 `#` 前缀（bot.yaml → no_handler_tip_prefix）。
+ * 换一个 user_id，避开同一个人的 10 秒提示节流，确保这里是真的被前缀挡掉的。
+ * （"带 # 的指令仍会提示"由上面 `#静默拒绝` 一例覆盖。）
+ */
+clear()
+emit({ type: 'message', group_id: '888777666', user_id: '99998', msg: '今天天气不错' })
+await sleep(400)
+check('普通聊天（无 # 前缀）不触发无响应提示', json() === '[]', json().slice(0, 80))
 
 /* ---------- 13. #诊断 ---------- */
 clear()

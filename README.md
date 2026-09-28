@@ -83,7 +83,8 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 未指定 id 的框架级日志会显示 `[  JiuLi  ]`。
 
 - 收发消息内容、命中插件与正则、耗时都会记录（`bot.yaml → log_msg: false` 可关）
-- 指令命中规则但插件没响应时会补一句提示（`bot.yaml → no_handler_tip: false` 可关）
+- 指令命中规则但插件没响应时会补一句提示（默认关；开启后也只对 `#` 开头的消息提示，
+  `bot.yaml → no_handler_tip` / `no_handler_tip_prefix`）
 - 插件并行导入，启动慢时看「启动关键路径」那一行（详见[排查](docs/architecture.md#启动耗时分析)）
 
 ## 热重载

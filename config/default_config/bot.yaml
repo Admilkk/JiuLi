@@ -13,7 +13,10 @@ log_msg: true
 # 消息内容预览长度
 log_msg_length: 60
 # 指令命中了规则但没有插件响应时，主动提示一句（如非主人使用主人指令）
+# 只在以 no_handler_tip_prefix 开头的消息上提示，避免普通聊天被插件的宽泛规则匹配后也回一句
 no_handler_tip: false
+# 上面那条提示认的指令前缀，多个用逗号分隔；写 * 表示不限制前缀（任何消息都可能提示）
+no_handler_tip_prefix: "#"
 # 插件加载超时
 plugin_load_timeout: 60
 # 监听文件变化

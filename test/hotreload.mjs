@@ -476,14 +476,14 @@ export default class RoutePlugin extends JiuLiPlugin {
   await sleep(4500)
   check('改 lib/ 下的工具模块 → 仍然重载并生效', changes === 1 && (await ask()).includes('风暴 v2'), `changes=${changes}`)
 
-  /** b) 熔断：连续 5 次重载后暂停监听 */
+  /** b) 熔断：**机器自激**重载连续 5 次后暂停监听（人工改文件不计，见 b0） */
   for (let i = 0; i < 5; i++) {
     await loader.changePlugin(key)
-    loader.noteReload?.(key)
+    loader.noteReload?.(key, key)
     await sleep(200)
   }
   const paused = loader.pausedReload?.has(key) === true
-  check('同一插件 60 秒内重载 5 次 → 熔断（暂停监听）', paused, `pausedReload=${paused}`)
+  check('插件自激重载 5 次 → 熔断（暂停监听）', paused, `pausedReload=${paused}`)
 
   changes = 0
   fs.writeFileSync(utilPath, "export function label() {\n  return 'v3'\n}\n")
@@ -494,10 +494,22 @@ export default class RoutePlugin extends JiuLiPlugin {
   await loader.load(true)
   check('发 #重载 后解除熔断', loader.pausedReload?.has(key) === false, `pausedReload=${loader.pausedReload?.has(key)}`)
 
+  /** b0) 开发者连续改文件测试功能：人工改动不该被当成风暴（这是最容易误伤的场景） */
+  for (let i = 0; i < 12; i++) {
+    await loader.changePlugin(key)
+    loader.noteReload?.(key, null)
+    await sleep(150)
+  }
+  check(
+    '开发者连改 12 次代码（人工改动）→ 不熔断',
+    loader.pausedReload?.has(key) === false,
+    `pausedReload=${loader.pausedReload?.has(key)}`,
+  )
+
   /** b2) 单插件恢复：`#重载 <插件名>` 走 resumeReload(key)，只解除这一个 */
   for (let i = 0; i < 5; i++) {
     await loader.changePlugin(key)
-    loader.noteReload?.(key)
+    loader.noteReload?.(key, key)
     await sleep(200)
   }
   const pausedBefore = loader.pausedReload?.has(key) === true
@@ -518,11 +530,11 @@ export default class RoutePlugin extends JiuLiPlugin {
   cfg.invalidate('jiuli')
   for (let i = 0; i < 2; i++) {
     await loader.changePlugin(key)
-    loader.noteReload?.(key)
+    loader.noteReload?.(key, key)
     await sleep(200)
   }
   check(
-    'reload_limit 可配置：改成 2 后重载 2 次即熔断',
+    'reload_limit 可配置：改成 2 后自激重载 2 次即熔断',
     loader.pausedReload?.has(key) === true,
     `pausedReload=${loader.pausedReload?.has(key)}`,
   )
@@ -533,11 +545,11 @@ export default class RoutePlugin extends JiuLiPlugin {
   cfg.invalidate('jiuli')
   for (let i = 0; i < 8; i++) {
     await loader.changePlugin(key)
-    loader.noteReload?.(key)
+    loader.noteReload?.(key, key)
     await sleep(100)
   }
   check(
-    'reload_limit: 0 → 关闭熔断，连重载 8 次也不暂停',
+    'reload_limit: 0 → 关闭熔断，连自激重载 8 次也不暂停',
     loader.pausedReload?.has(key) === false,
     `pausedReload=${loader.pausedReload?.has(key)}`,
   )
@@ -546,6 +558,92 @@ export default class RoutePlugin extends JiuLiPlugin {
 
   loader.changePlugin = origChange
   await sleep(3000)
+  fs.rmSync(dir, { recursive: true, force: true })
+  await sleep(3000)
+}
+
+/**
+ * 11. 插件在加载时改写自己的文件 → 跳过那次重载（自激循环的通用兜底）
+ *     以及：删掉嵌套文件不再把整个插件卸载
+ */
+{
+  const dir = path.join(PLUGINS_DIR, 'hotreload-selfwrite')
+  fs.mkdirSync(path.join(dir, 'apps'), { recursive: true })
+  const genPath = path.join(dir, 'apps', 'gen.js')
+  fs.writeFileSync(genPath, "export function label() {\n  return 'gen'\n}\n")
+  /** 顶层就写自己的文件：真实事故里 miao 的 config/cfg.js 就是这么干的 */
+  fs.writeFileSync(
+    path.join(dir, 'index.js'),
+    [
+      "import { writeFileSync } from 'node:fs'",
+      "import { fileURLToPath } from 'node:url'",
+      "import { JiuLiPlugin } from 'jiuli'",
+      "import { label } from './apps/gen.js'",
+      '',
+      "writeFileSync(fileURLToPath(new URL('./apps/gen.js', import.meta.url)), '// gen ' + Date.now() + '\\n')",
+      '',
+      'export default class SelfWrite extends JiuLiPlugin {',
+      '  constructor() {',
+      "    super({ name: '自激改写测试', dsc: 'test', event: 'message', priority: -Infinity, rule: [{ reg: '^#自激改写$', fnc: 'hi' }] })",
+      '  }',
+      "  async hi() { return this.reply('自激 ' + label()) }",
+      '}',
+      '',
+    ].join('\n'),
+  )
+
+  let selfChanges = 0
+  const orig2 = loader.changePlugin.bind(loader)
+  loader.changePlugin = async k => {
+    if (k === 'hotreload-selfwrite') selfChanges++
+    return orig2(k)
+  }
+  await sleep(6000)
+
+  check(
+    '插件在加载时改写自己的文件 → 不触发重载（自激循环断在这里）',
+    selfChanges === 0,
+    `changePlugin 调用 ${selfChanges} 次`,
+  )
+  sent.length = 0
+  emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#自激改写' })
+  await sleep(500)
+  check('跳过一次重载后插件仍然正常工作', json().includes('自激 gen'), json().slice(0, 60))
+
+  /** 人工改同一个文件：mtime 不在求值窗口里 → 照常重载（开发者不会被挡住） */
+  selfChanges = 0
+  fs.writeFileSync(genPath, "export function label() {\n  return '人工改'\n}\n")
+  await sleep(4500)
+  sent.length = 0
+  emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#自激改写' })
+  await sleep(500)
+  check(
+    '人工改同一个文件 → 照常重载（人工改动不被自激判定误伤）',
+    selfChanges === 1 && json().includes('人工改'),
+    `changePlugin ${selfChanges} 次 · ${json().slice(0, 40)}`,
+  )
+
+  /** 删嵌套文件：插件目录还在，只能重载，不能把整个插件卸载掉 */
+  const before = loader.priority.filter(i => i.key === 'hotreload-selfwrite').length
+  fs.rmSync(genPath)
+  await sleep(5000)
+  const after = loader.priority.filter(i => i.key === 'hotreload-selfwrite').length
+  check(
+    '删嵌套文件不会卸载整个插件（插件目录仍在）',
+    before > 0 && after > 0,
+    `priority 条目 ${before} → ${after}`,
+  )
+
+  /** 删入口才算插件被删 */
+  fs.rmSync(path.join(dir, 'index.js'))
+  await sleep(5000)
+  check(
+    '删入口文件才卸载插件',
+    loader.priority.filter(i => i.key === 'hotreload-selfwrite').length === 0,
+    `priority 条目 ${loader.priority.filter(i => i.key === 'hotreload-selfwrite').length}`,
+  )
+
+  loader.changePlugin = orig2
   fs.rmSync(dir, { recursive: true, force: true })
   await sleep(3000)
 }
