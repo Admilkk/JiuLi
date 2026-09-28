@@ -119,6 +119,16 @@ app.js（模式：internal / external / pm2 / daemon / stop）
    路由、`Bot.wsf` 路径同一套机制：加载上下文里挂的监听记在插件名下，卸载 / 重载时移除；
    **运行期**动态挂的监听不记（那不属于插件资源）。
 
+5. **配置/数据目录里的 js 不再无条件重载，并且有熔断兜底**。ESM 缓存永不释放旧模块图，
+   所以「重载→写文件→再重载」的自激循环会在几十秒内把内存打爆（实测：miao-plugin 的
+   `config/cfg.js` 在模块顶层把配置写回自己，watcher 看到变化就重载 miao，重载又写一遍，
+   ~2.2 秒一轮，每轮永久泄漏一张模块图 → OOM）。两道闸：`config|data|resources|temp` 下的
+   `.js` 先用正则判结构（插件类 / `rule` / `apps` / `task` / `accept` / `handler` / `fnc` / `reg`…），
+   纯数据不重载，确实是插件的照旧；再加按插件的重载频率熔断 —— 窗口内重载到上限
+   （`perf.reload_limit` / `perf.reload_window`，默认 5 次 / 60 秒，配 0 关闭）就只暂停**这个**
+   插件的重载监听并打 ERROR，`#重载 <插件名>` 强制刷新即恢复（`resumeReload` 只能由指令层调用：
+   watcher 重载也走 `changePlugin`，放里面会顺手清计数，熔断就永不触发）。
+
 另外两处与热重载配套：
 
 - **资源归属**：Bot 登记插件注册的 express 路由 / WS 路径 / 加载期事件监听时，读的是
