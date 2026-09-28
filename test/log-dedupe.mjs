@@ -40,7 +40,13 @@ console.error = origError
 
 const count = (text, sub) => text.split(sub).length - 1
 const consoleText = out.join('\n')
-const fileText = fs.readFileSync(path.join(logDir, `jiuli.${new Date().toISOString().slice(0, 10)}.log`), 'utf8')
+/** 日志文件名是**本地**日期：不能用 toISOString()（UTC，本地 00:00-08:00 会差一天） */
+const localDay = () => {
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+const fileText = fs.readFileSync(path.join(logDir, `jiuli.${localDay()}.log`), 'utf8')
 
 const results = []
 const check = (name, ok, extra) => {

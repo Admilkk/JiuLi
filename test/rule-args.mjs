@@ -136,7 +136,13 @@ check('方法自己声明了第二个参数时才收到捕获结果', globalThis
 await send('#参数C')
 await sleep(500)
 
-const day = new Date().toISOString().slice(0, 10)
+/** 日志文件名是**本地**日期：不能用 toISOString()（UTC，本地 00:00-08:00 会差一天） */
+const localDay = () => {
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+const day = localDay()
 const commandFile = path.join(logDir, `command.${day}.log`)
 const errorFile = path.join(logDir, 'error.log')
 const fullFile = path.join(logDir, `jiuli.${day}.log`)

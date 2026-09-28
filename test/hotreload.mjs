@@ -405,6 +405,133 @@ export default class RoutePlugin extends JiuLiPlugin {
   await sleep(3000)
 }
 
+/**
+ * 10. 重载风暴防护（实测 OOM 事故）
+ *
+ * 事故：miao 的 components/Cfg.js 在模块求值时就 saveCfg()，即每次 miao 被求值都会重写
+ * `plugins/miao-plugin/config/cfg.js`；而框架对 plugins/** 下任何 .js 变化都重载整个插件
+ * → 重载又写一遍 → 2 秒一轮的自激循环，每轮永久多留一张模块图 → 30 秒打爆 1GB（SIGABRT）。
+ *
+ * 两道防线：
+ *   a) 配置/数据目录（config/ data/ resources/ temp/）里的 .js：只有"像插件模块"才重载；
+ *      纯 `export const x = 1` 的配置/数据不重载 —— 循环根本起不来。
+ *   b) 兜底熔断：同一插件 60 秒内重载 ≥5 次就暂停它的重载监听并告警，#重载 恢复。
+ */
+{
+  const key = 'hotreload-storm'
+  const dir = path.join(PLUGINS_DIR, key)
+  fs.rmSync(dir, { recursive: true, force: true })
+  fs.mkdirSync(path.join(dir, 'config'), { recursive: true })
+  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true })
+  const indexPath = path.join(dir, 'index.js')
+  const dataPath = path.join(dir, 'config', 'data.js')
+  const utilPath = path.join(dir, 'lib', 'util.js')
+  fs.writeFileSync(
+    indexPath,
+    [
+      "import { label } from './lib/util.js'",
+      "import { JiuLiPlugin } from 'jiuli'",
+      '',
+      'export default class StormPlugin extends JiuLiPlugin {',
+      '  constructor() {',
+      "    super({ name: '风暴测试', dsc: 'test', event: 'message', priority: -Infinity, rule: [{ reg: '^#风暴测试$', fnc: 'hi' }] })",
+      '  }',
+      "  async hi() { return this.reply('风暴 ' + label()) }",
+      '}',
+      '',
+    ].join('\n'),
+  )
+  /** 纯数据/配置：没有插件结构 */
+  fs.writeFileSync(dataPath, "export const enable = false\nexport const limit = 3\n")
+  /** 工具模块：没有插件结构，但不在配置/数据目录 → 仍然要重载 */
+  fs.writeFileSync(utilPath, "export function label() {\n  return 'v1'\n}\n")
+  await sleep(4500)
+
+  /** 数一下真正发生的重载次数（不数日志，避免日志级别影响断言） */
+  const origChange = loader.changePlugin.bind(loader)
+  let changes = 0
+  loader.changePlugin = async k => {
+    changes++
+    return origChange(k)
+  }
+
+  const ask = async () => {
+    sent.length = 0
+    emit({ type: 'message', group_id: '777000111', user_id: '10001', msg: '#风暴测试' })
+    await sleep(500)
+    return json()
+  }
+
+  check('风暴测试插件已加载', (await ask()).includes('风暴 v1'), json().slice(0, 40))
+
+  /** a) 配置/数据目录里的纯数据 .js：改它不该重载 */
+  changes = 0
+  fs.writeFileSync(dataPath, "export const enable = true\nexport const limit = 9\n")
+  await sleep(4500)
+  check('改 config/ 下的纯数据 .js → 不重载', changes === 0, `changePlugin 调用 ${changes} 次`)
+
+  /** 代码目录里的工具模块：即使没有插件结构也要重载（插件开发者改 lib/ 必须生效） */
+  changes = 0
+  fs.writeFileSync(utilPath, "export function label() {\n  return 'v2'\n}\n")
+  await sleep(4500)
+  check('改 lib/ 下的工具模块 → 仍然重载并生效', changes === 1 && (await ask()).includes('风暴 v2'), `changes=${changes}`)
+
+  /** b) 熔断：连续 5 次重载后暂停监听 */
+  for (let i = 0; i < 5; i++) {
+    await loader.changePlugin(key)
+    loader.noteReload?.(key)
+    await sleep(200)
+  }
+  const paused = loader.pausedReload?.has(key) === true
+  check('同一插件 60 秒内重载 5 次 → 熔断（暂停监听）', paused, `pausedReload=${paused}`)
+
+  changes = 0
+  fs.writeFileSync(utilPath, "export function label() {\n  return 'v3'\n}\n")
+  await sleep(4500)
+  check('熔断期间文件变化不再重载', changes === 0, `changePlugin 调用 ${changes} 次`)
+
+  /** #重载（load(true)）恢复监听 */
+  await loader.load(true)
+  check('发 #重载 后解除熔断', loader.pausedReload?.has(key) === false, `pausedReload=${loader.pausedReload?.has(key)}`)
+
+  /** c) 阈值可配置：改小 reload_limit 就按新阈值熔断（不写死 5/60） */
+  const cfg = (await import('../lib/core/config/index.js')).default
+  fs.writeFileSync('test/.tmp-config/jiuli.yaml', 'perf:\n  reload_limit: 2\n  reload_window: 60\n')
+  cfg.invalidate('jiuli')
+  for (let i = 0; i < 2; i++) {
+    await loader.changePlugin(key)
+    loader.noteReload?.(key)
+    await sleep(200)
+  }
+  check(
+    'reload_limit 可配置：改成 2 后重载 2 次即熔断',
+    loader.pausedReload?.has(key) === true,
+    `pausedReload=${loader.pausedReload?.has(key)}`,
+  )
+
+  /** d) reload_limit: 0 → 关闭熔断（仍保留配置/数据的结构判定） */
+  await loader.load(true)
+  fs.writeFileSync('test/.tmp-config/jiuli.yaml', 'perf:\n  reload_limit: 0\n')
+  cfg.invalidate('jiuli')
+  for (let i = 0; i < 8; i++) {
+    await loader.changePlugin(key)
+    loader.noteReload?.(key)
+    await sleep(100)
+  }
+  check(
+    'reload_limit: 0 → 关闭熔断，连重载 8 次也不暂停',
+    loader.pausedReload?.has(key) === false,
+    `pausedReload=${loader.pausedReload?.has(key)}`,
+  )
+  fs.rmSync('test/.tmp-config/jiuli.yaml', { force: true })
+  cfg.invalidate('jiuli')
+
+  loader.changePlugin = origChange
+  await sleep(3000)
+  fs.rmSync(dir, { recursive: true, force: true })
+  await sleep(3000)
+}
+
 /* 汇总 */
 fs.rmSync(DIR, { recursive: true, force: true })
 const pass = results.filter(r => r.ok).length

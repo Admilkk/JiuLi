@@ -114,7 +114,10 @@ const send = async (msg, user_id = '10001', wait = 8000) => {
   reset()
   emit({ type: 'message', group_id: 'mock:88001', user_id, msg })
   await sleep(wait)
-  const day = new Date().toISOString().slice(0, 10)
+  /** 日志文件名是本地日期（不要用 toISOString：UTC，本地凌晨会差一天） */
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
   const file = path.join(logDir, `command.${day}.log`)
   const hit = fs.existsSync(file)
     ? fs

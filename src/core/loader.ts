@@ -119,6 +119,10 @@ class PluginsLoader {
   msgThrottle: Record<string, boolean> = {}
 
   watcher: Record<string, any> = {}
+  /** 重载风暴熔断：同一插件在窗口内的重载时刻表 */
+  private reloadMarks = new Map<string, number[]>()
+  /** 被熔断的插件（暂停其重载监听，`#重载` 恢复） */
+  private pausedReload = new Set<string>()
   taskMap = new Map<string, Set<any>>()
   pluginCountMap = new Map<string, number>()
   pluginCount = 0
@@ -178,6 +182,16 @@ class PluginsLoader {
       for (const key of keys) await this.unloadPlugin(key)
       /** 整目录刷新：代数 +1，所有插件的模块图都换新 */
       bumpModuleGeneration()
+      /** 手动 #重载 同时解除重载风暴熔断 */
+      if (this.pausedReload.size) {
+        util.makeLog(
+          'mark',
+          `已恢复重载监听：${[...this.pausedReload].map(k => logger.cyan(k)).join(' · ')}`,
+          'Plugin',
+        )
+        this.pausedReload.clear()
+      }
+      this.reloadMarks.clear()
     }
     if (this.priority.length) return
 
@@ -1349,6 +1363,73 @@ class PluginsLoader {
   }
 
   /**
+   * 这个 .js 变化值不值得**重载整个插件**
+   *
+   * 起因（实测 OOM 事故）：miao 的 `components/Cfg.js` 在模块求值时就 `saveCfg()`，
+   * 也就是**每次 miao 被求值都会重写 `plugins/miao-plugin/config/cfg.js`**；
+   * 而框架对 `plugins/**` 下任何 `.js` 变化都重载整个插件 → 重载又写一遍 →
+   * 2 秒一轮的自激循环，每轮都新求值一整张模块图（ESM 缓存不释放旧图）→ 30 秒打爆 1GB。
+   *
+   * 规则：
+   * - 插件**私有配置 / 数据目录**（`config/`、`data/`、`resources/`、`temp/`）里的 `.js`，
+   *   只有"看起来是插件模块"（有插件结构：plugin 类 / rule / apps / task / handler / fnc / reg…）
+   *   才重载 —— 纯 `export const xxx = false` 这种配置/数据不重载。
+   * - 其它位置（入口、`apps/`、`lib/`、`model/`、自建目录）一律照旧重载，
+   *   插件开发者改工具函数、改子应用都能即时生效。
+   * - `unlink` 不判定（文件已经没了，读不到内容；删除本来就少见，保守处理）。
+   */
+  private isPluginModule(content: string): boolean {
+    return /extends\s+(plugin|JiuLiPlugin|BasePlugin|JiuLiBase)\b|definePlugin\s*\(|module\.exports|export\s+default\s+class|export\s+(const|let|var)\s+(rule|apps|task|accept|handler|hooks|socket)\b|export\s*\{[^}]*\b(rule|apps|task|accept|handler)\b|\b(fnc|reg|priority|permission)\s*:/.test(
+      content,
+    )
+  }
+
+  /** 见 isPluginModule 注释；这里只负责「读文件 + 决定」 */
+  private async shouldReloadJs(rel: string, fullPath: string): Promise<boolean> {
+    /** 代码目录：直接放行 */
+    if (!/(^|\/)(config|data|resources|temp)\//.test(rel)) return true
+    try {
+      /** 只读头部：配置文件很小，真有大文件也不至于把内存搭进去 */
+      return this.isPluginModule((await fs.readFile(fullPath, 'utf8')).slice(0, 200_000))
+    } catch {
+      /** 读不到（权限 / 刚被删）就当配置处理，不重载 */
+      return false
+    }
+  }
+
+  /**
+   * 记录一次重载；同一插件短时间内反复重载就**熔断**（暂停它的重载监听）
+   *
+   * 上面那条"结构判定"挡住的是配置/数据文件；这里兜底挡"插件自己改写代码文件"之类的循环：
+   * 顶着熔断继续循环的话，每轮都会永久泄漏一张模块图，几十秒就能把内存打爆。
+   */
+  private noteReload(key: string) {
+    // 阈值走配置，方便按机器/插件调松紧；配 0 表示关掉熔断（只留上面的结构判定）
+    const perf: any = cfg.getPerf()
+    const limit = Math.max(0, Number(perf.reload_limit ?? 5) || 0)
+    const windowSec = Math.max(1, Number(perf.reload_window ?? 60) || 60)
+    if (!limit) return
+
+    const windowMs = windowSec * 1000
+    const now = Date.now()
+    const marks = (this.reloadMarks.get(key) || []).filter(t => now - t < windowMs)
+    marks.push(now)
+    this.reloadMarks.set(key, marks)
+    if (marks.length < limit) return
+
+    this.pausedReload.add(key)
+    this.reloadMarks.delete(key)
+    util.makeLog(
+      'error',
+      `插件 ${logger.cyan(key)} 在 ${windowSec} 秒内被重载了 ${marks.length} 次，已**暂停它的重载监听**（防重载风暴）\n` +
+        '  常见原因：插件在加载时会改写自己目录下的 .js（例如 miao 的 config/cfg.js），形成"改文件 → 重载 → 又改文件"的自激循环；\n' +
+        '  每轮重载都会永久占用一张模块图（ESM 缓存不释放），顶着循环跑几十秒就能把内存打爆。\n' +
+        '  处理：修好根因后发 #重载 恢复监听；内存已经涨上去的话直接 #重启。',
+      'Plugin',
+    )
+  }
+
+  /**
    * 监听整个 plugins/ 目录：新增 js 自动加载、修改自动重载、删除自动卸载
    * 非 js 资源变化不触发重载（渲染层自带缓存失效）
    */
@@ -1411,14 +1492,28 @@ class PluginsLoader {
         return
       }
 
+      /** 配置/数据目录里的纯数据 .js 不重载（见 isPluginModule：miao 的 cfg.js 自激循环就出在这） */
+      if (!(await this.shouldReloadJs(rel, file))) {
+        util.makeLog('debug', `配置/数据变化（非插件模块，不重载）· ${rel}`, 'Plugin')
+        return
+      }
+
+      /** 熔断中的插件不再重载（等 #重载 恢复） */
+      if (this.pausedReload.has(key)) {
+        util.makeLog('debug', `插件 ${key} 的重载监听已暂停（重载风暴熔断中），发 #重载 可恢复`, 'Plugin')
+        return
+      }
+
       const loaded = this.isLoaded(key)
       util.makeLog(
         'mark',
         `插件${action === 'add' ? '新增' : '修改'} → ${loaded ? '重载' : '加载'} · ${logger.cyan(rel)}`,
         'Plugin',
       )
-      if (loaded) await this.changePlugin(key)
-      else await this.loadKey(key)
+      if (loaded) {
+        await this.changePlugin(key)
+        this.noteReload(key)
+      } else await this.loadKey(key)
     }
 
     const flushEvents = async () => {

@@ -114,6 +114,11 @@ fs.writeFileSync(
   'test/.tmp-config/group.yaml',
   ['default:', '  groupCD: 0', '  singleCD: 0', '  onlyReplyAt: 0', '  botAlias:', '    - 玖璃'].join('\n'),
 )
+/**
+ * 默认配置已经把 no_handler_tip 改成 false（不再主动提示无响应），
+ * 但下面 12b 要验证的正是这个提示机制，所以测试里显式打开它。
+ */
+fs.writeFileSync('test/.tmp-config/bot.yaml', 'no_handler_tip: true\n')
 
 const { start } = await import('../lib/core/start.js')
 const bot = await start()
