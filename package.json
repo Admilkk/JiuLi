@@ -96,10 +96,5 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "sqlite3": "npm:@karinjs/sqlite3@^0.4.3"
-    }
   }
 }
