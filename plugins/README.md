@@ -51,6 +51,8 @@
 阈值可调：`config/config/jiuli.yaml → perf.reload_limit / perf.reload_window`
 （`reload_limit: 0` 关闭熔断）；另有 `perf.reload_global_limit`：一分钟内任何来源的重载超过它
 （默认 12）就打一条 ERROR 提醒（只告警不暂停，避免批量格式化误伤）。
+已知边界：插件**异步**延迟写回自己的文件（加载完过几秒再写）不在"求值窗口"内，
+自激跳过抓不到它，靠上面那条全局频率告警暴露出来。
 
 ## 写自己的插件
 
