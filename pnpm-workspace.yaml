@@ -2,7 +2,12 @@ packages:
   - 'plugins/**'
 
 strictDepBuilds: false
+# pnpm 10 起默认不跑依赖的 install 脚本，没列在这里的原生模块永远拿不到 .node 绑定文件。
+# 插件声明了原生依赖但忘在这加，运行时会报
+# `Could not locate the bindings file ... xxx.node`，且只在真正用到时才炸（插件侧常被 catch 吞掉，
+# 表现为「明明路径对却读不到数据」）。
 onlyBuiltDependencies:
+  - better-sqlite3
   - classic-level
   - puppeteer
   - sqlite3
