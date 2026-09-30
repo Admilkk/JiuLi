@@ -34,7 +34,7 @@
     "test": "node test/smoke.mjs",
     "test:hot": "node test/hotreload.mjs",
     "test:restart": "node test/supervisor-check.mjs",
-    "test:all": "node test/smoke.mjs && node test/daemon-stop.mjs && node test/broken-plugin.mjs && node test/ecosystem-gate.mjs && node test/redis-fallback.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs && node test/update-check.mjs && node test/cli-session.mjs && node test/cli-args.mjs && node test/cli-deps.mjs && node test/plugin-dedup.mjs && node test/install-plugin.mjs && node test/rule-args.mjs && node test/deps-check.mjs && node test/log-dedupe.mjs && node test/ported-plugins.mjs",
+    "test:all": "node test/smoke.mjs && node test/daemon-stop.mjs && node test/broken-plugin.mjs && node test/ecosystem-gate.mjs && node test/redis-fallback.mjs && node test/hotreload.mjs && node test/supervisor-check.mjs && node test/update-check.mjs && node test/cli-session.mjs && node test/cli-args.mjs && node test/cli-deps.mjs && node test/plugin-dedup.mjs && node test/install-plugin.mjs && node test/rule-args.mjs && node test/deps-check.mjs && node test/log-dedupe.mjs && node test/config-path.mjs && node test/ported-plugins.mjs",
     "test:ported": "node test/ported-plugins.mjs",
     "test:update": "node test/update-check.mjs",
     "test:load": "node test/load-check.mjs",
@@ -48,6 +48,7 @@
     "test:args": "node test/rule-args.mjs",
     "test:deps": "node test/deps-check.mjs",
     "test:logdedupe": "node test/log-dedupe.mjs",
+    "test:configpath": "node test/config-path.mjs",
     "test:trss": "node test/trss-archive.mjs",
     "test:trsstpl": "node test/trss-template.mjs"
   },

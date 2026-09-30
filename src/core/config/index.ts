@@ -28,6 +28,25 @@ function safeLog(msg: any) {
   }
 }
 
+/**
+ * 递归复制目录（等价 fs.cpSync(src, dst, { recursive: true })）
+ *
+ * 为什么不用 fs.cpSync：Node 25（Windows）上递归拷贝「源路径含非 ASCII 字符」的目录
+ * 会直接崩掉进程——退出码 0xC0000409(STATUS_STACK_BUFFER_OVERRUN)、没有任何 JS 报错、
+ * 连 catch 都进不去。于是把 JiuLi 装在中文路径（如 D:\yunzaibot\测试\测试jiuli\jiuli）的用户
+ * 首次启动会在 initCfg() 里静默死掉，看起来就像「node . 什么都不做就退出了」。
+ * 手写递归用 readdirSync + copyFileSync，对非 ASCII 路径正常。
+ */
+function copyDir(src: string, dst: string) {
+  fs.mkdirSync(dst, { recursive: true })
+  for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, ent.name)
+    const to = path.join(dst, ent.name)
+    if (ent.isDirectory()) copyDir(from, to)
+    else fs.copyFileSync(from, to)
+  }
+}
+
 /** file_watch=false 时使用的空 watcher */
 class NullWatcher extends EventEmitter {
   on() {
@@ -84,13 +103,21 @@ class Cfg {
         const files = fs.readdirSync(dir)
         for (const i of filesDef)
           if (!files.includes(i)) fs.copyFileSync(`${defDir}${i}`, `${dir}${i}`)
-      } else fs.cpSync(defDir, dir, { recursive: true })
-  /** pm2 配置放在 config/ 下，供 pnpm start 使用 */
+      } else copyDir(defDir, dir)
+      /** pm2 配置放在 config/ 下，供 pnpm start 使用 */
       const pm2File = 'config/pm2.yaml'
       if (!fs.existsSync(pm2File) && fs.existsSync(`${defDir}pm2.yaml`))
         fs.copyFileSync(`${defDir}pm2.yaml`, pm2File)
-      /** 清理被误复制进用户配置目录的 pm2.yaml */
-      if (fs.existsSync(`${dir}pm2.yaml`)) fs.rmSync(`${dir}pm2.yaml`, { force: true })
+      /** 清理被误复制进用户配置目录的 pm2.yaml
+       *  用 unlinkSync 而不是 rmSync：Node 25（Windows）在非 ASCII 路径下 rmSync 会静默失效 */
+      const stray = `${dir}pm2.yaml`
+      if (fs.existsSync(stray)) {
+        try {
+          fs.unlinkSync(stray)
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (err) {
       safeLog(`[Config] 初始化配置目录失败：${err}`)
     }
