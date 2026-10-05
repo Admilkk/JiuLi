@@ -25,22 +25,24 @@ class Start extends JiuLiPlugin {
 }
 
 /**
- * #重启 / #关机 / #停止
+ * #重启 / #关机（#停机 是别名）
  *
  * 关机通过把分发列表替换为「只保留开机插件」实现（与云崽一致的技巧），
- * 重启/停止会记录上下文并在下次上线时通知到原会话。
+ * 期间除 #开机 外所有指令都不响应；重启会记录上下文并在下次上线时通知到原会话。
+ *
+ * 原先的 #停机 是直接退出进程（Bot.exit），在 pm2 托管下会被立刻重新拉起，
+ * 看起来就是「停机=重启」，所以这个功能已经删掉，停机改成与关机同义。
  */
 export default class Restart extends JiuLiPlugin {
   constructor(e) {
     super({
       name: '进程管理',
-      dsc: '#重启 #关机 #停止',
+      dsc: '#重启 #关机 #停机',
       event: 'message',
       priority: -Infinity,
       rule: [
         { reg: '^#重启$', fnc: 'restart', permission: 'master' },
-        { reg: '^#关机$', fnc: 'stop', permission: 'master' },
-        { reg: '^#停(机|止)$', fnc: 'exit', permission: 'master' },
+        { reg: '^#?(关机|停机)$', fnc: 'stop', permission: 'master' },
       ],
     })
     if (e) this.e = e
@@ -73,6 +75,7 @@ export default class Restart extends JiuLiPlugin {
     if (restart.isStop) return this.stop(restart.time)
 
     const time = Bot.getTimeDiff(restart.time)
+    /** isExit 只可能来自旧版本 #停机 留下的键，现已没有这个指令 */
     const msg = [restart.isExit ? `开机成功，距离上次停止${time}` : `重启成功，用时${time}`]
 
     if (restart.group_id) await Bot.sendGroupMsg(restart.bot_id, restart.group_id, msg)
@@ -80,14 +83,15 @@ export default class Restart extends JiuLiPlugin {
     else await Bot.sendMasterMsg(msg)
   }
 
-  async set(isExit) {
+  /** 重启前记录上下文；重启上线后由 restartMsg 通知到原会话 */
+  async set() {
     if (temp.priority)
       return redis.set(this.key, JSON.stringify({ isStop: true, time: temp.stop_time }))
-    await this.reply(`开始${isExit ? '停止' : '重启'}，本次运行时长${Bot.getTimeDiff()}`)
+    await this.reply(`开始重启，本次运行时长${Bot.getTimeDiff()}`)
     return redis.set(
       this.key,
       JSON.stringify({
-        isExit,
+        isExit: false,
         group_id: this.e.group_id,
         user_id: this.e.user_id,
         bot_id: this.e.self_id,
@@ -108,13 +112,7 @@ export default class Restart extends JiuLiPlugin {
     PluginsLoader.priority = [{ plugin: new Start(), class: Start, key: 'system/restart-start', name: '开机', priority: 0, namespace: 'system/restart-start' }]
     if (typeof time === 'number') return (temp.stop_time = time)
     temp.stop_time = Date.now()
-    return this.reply(`关机成功，本次运行时长${Bot.getTimeDiff(temp.start_time)}`)
-  }
-
-  async exit() {
-    await this.set(true)
-    const ret = await Bot.exit()
-    await this.reply(`停止错误\n${Bot.String(ret)}`)
+    return this.reply(`关机成功，本次运行时长${Bot.getTimeDiff(temp.start_time)}\n发送 #开机 即可恢复响应`)
   }
 }
 
