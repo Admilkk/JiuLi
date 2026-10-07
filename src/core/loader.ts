@@ -136,6 +136,11 @@ class PluginsLoader {
   taskMap = new Map<string, Set<any>>()
   pluginCountMap = new Map<string, number>()
   pluginCount = 0
+  /** 因插件超时而未导入的文件：收尾汇总列出，并允许补拉一次 */
+  private abandoned: Array<{ name: string; path: string }> = []
+  private retriedAbandoned = false
+  /** 批量补拉中：逐个 import 不各自重建索引，结束时统一重建一次 */
+  private bulkRetry = false
   load_time: Record<string, number> = {}
   /**
    * 插件首次加载的顺序号，重载时保持不变。
@@ -236,9 +241,11 @@ class PluginsLoader {
 
     /** 还没就绪的插件：等待期间每 5 秒报一次进度，避免「卡住了一样没输出」 */
     const pending = new Set(files.map(f => f.name))
+    /** 正在导入的文件：pending 还含排队未开始的，进度里点名它们会误导 */
+    const inflight = new Set<string>()
     const report = setInterval(() => {
-      if (!pending.size) return
-      const list = [...pending]
+      if (!inflight.size) return
+      const list = [...inflight]
       util.makeLog(
         'warn',
         `等待 ${logger.yellow(String(list.length))} 个插件就绪（已等 ${Math.round((Date.now() - loadStart) / 1000)} 秒）：` +
@@ -261,21 +268,29 @@ class PluginsLoader {
     const queue = [...files]
     /** 一旦有插件超时，说明加载器被它卡住了：继续导入只会一个个耗完超时，直接收工 */
     let stalled = false
+    let stalledBy = ''
     const worker = async () => {
       while (queue.length && !stalled) {
         const file = queue.shift()!
-        const timeout = cfg.bot.plugin_load_timeout * 1000
+        /** 下限 1 秒：配置成 0 / 负数 / 非数字时会让每个插件都被判超时，等于全部不加载 */
+        const timeout = Math.max(1000, Number(cfg.bot.plugin_load_timeout) * 1000 || 0)
         const started = Date.now()
+        inflight.add(file.name)
         if ((await util.sleep(timeout, this.importPlugin(file, packageErr))) === util.sleepTimeout) {
           stalled = true
-          const rest = queue.length
+          stalledBy = file.name
+          /** 队列里还没轮到导入的文件 + 其他 worker 在飞的文件：并发下两个 worker 都可能进来，只记一次 */
+          if (!this.abandoned.length) {
+            const others = files.filter(f => f.name !== file.name && inflight.has(f.name))
+            this.abandoned = [...queue, ...others]
+          }
           queue.length = 0
           util.makeLog(
             'error',
             `插件加载超时（${timeout / 1000} 秒）${logger.red(file.name)}\n` +
               `        该插件顶层可能在做重活或卡住了，并且会阻塞后续插件的导入\n` +
-              `        本轮已加载 ${this.pluginCount} 个插件${rest ? `，跳过剩余 ${rest} 个` : ''}；修好后发 #重载 或重启即可\n` +
-              `        排查：临时把该文件改名（如加 .disabled 后缀）或移走，再看是否恢复正常`,
+              `        本轮已加载 ${this.pluginCount} 个插件；没加载的会在收尾汇总里列出并再补拉一次\n` +
+              `        排查：把该文件改名（如加 .disabled 后缀）或移走；根因修好后发 #重载 或重启`,
             'Plugin',
           )
         } else if (Date.now() - started > 5000)
@@ -284,6 +299,7 @@ class PluginsLoader {
             `插件就绪较慢 ${logger.yellow(file.name)} · ${util.getTimeDiff(started)}（不影响启动，仅供参考）`,
             'Plugin',
           )
+        inflight.delete(file.name)
         pending.delete(file.name)
       }
     }
@@ -303,6 +319,28 @@ class PluginsLoader {
       `插件 ${logger.green(String(this.pluginCount))} 个 · 规则 ${rules} 条 · 事件监听 ${listeners} 个 · 定时任务 ${this.task.length} 个 · 用时 ${util.getTimeDiff(loadStart)}`,
       'Plugin',
     )
+    /**
+     * 被动中止加载时补齐「少了谁」：插件数少于磁盘文件数不会有别的地方体现，
+     * 过去只剩一行插件总数，看不出有插件没进来。
+     * 未导入的文件没有 load_time / pluginCountMap 记录，正好用这一点筛出来。
+     */
+    const neverImported = files.filter(f => !this.load_time[f.name]).map(f => f.name)
+    if (neverImported.length) {
+      const list = neverImported.slice(0, 8).join(' · ') + (neverImported.length > 8 ? ' …' : '')
+      /** 文案按「实际能补拉的数量」选，避免承诺了不补的文件 */
+      const retryable = this.abandoned.filter(f => neverImported.includes(f.name)).length
+      const hint = retryable
+        ? `其中 ${retryable} 个随后会再补拉一次（补拉结束统一打「补拉完成」），其余要发 #重载 或重启`
+        : '修好后发 #重载 或重启（#重载 不会重跑适配器，适配器缺失只能重启）'
+      util.makeLog(
+        'error',
+        `本轮未加载 ${logger.red(String(neverImported.length))} 个文件（磁盘 ${files.length} 个，已注册插件 ${this.pluginCount} 个）\n` +
+          `        ${list}\n` +
+          (stalledBy ? `        起因：${logger.red(stalledBy)} 导入超时，中止了本轮加载\n` : '') +
+          `        ${hint}`,
+        'Plugin',
+      )
+    }
     /** 并行导入下记录的是"开始加载 → 该插件就绪"（含公共依赖解析开销），不代表插件自身有问题 */
     const sorted = Object.entries(this.load_time).sort((a, b) => b[1] - a[1])
     const slow = sorted.filter(([, t]) => t > 200).slice(0, 8)
@@ -321,7 +359,61 @@ class PluginsLoader {
 
     /** 加载阶段结束：此后才就绪的插件（超时后才 import 完）会被自动补进分发 */
     this.loaded = true
+    /** 一个插件超时不该拖走同批队列里的其他插件：补拉一次，不阻塞启动 */
+    if (this.abandoned.length && !this.retriedAbandoned) {
+      this.retriedAbandoned = true
+      const files = this.abandoned
+      this.abandoned = []
+      const timeout = Math.max(1000, Number(cfg.bot.plugin_load_timeout) * 1000 || 0)
+      util.makeLog('warn', `补拉 ${files.length} 个被超时牵连的插件…`, 'Plugin')
+      this.retryAbandoned(files, timeout).catch(() => {})
+    }
     this.watchPlugins()
+  }
+
+  /**
+   * 补拉被超时牵连、本轮完全没导入的文件；逐个补，避免再出现同批卡住。
+   * 每个文件仍有自己的超时，整体在后台跑，不阻塞启动收尾。
+   * 期间挂起逐条重建，结束后统一建一次索引 / 排序 / 定时任务。
+   */
+  private async retryAbandoned(files: Array<{ name: string; path: string }>, timeout: number) {
+    const before = new Set(this.pluginCountMap.keys())
+    this.bulkRetry = true
+    let done = 0
+    let pending: string[] = []
+    try {
+      for (let idx = 0; idx < files.length; idx++) {
+        const file = files[idx]
+        /** 超时那个文件仍在 ESM 里求值（可能「迟到就绪」），别对同一个 URL 重复等 */
+        if (this.pluginCountMap.has(file.name) || this.isLoaded(file.name) || this.inertFiles.has(file.name))
+          continue
+        if ((await util.sleep(timeout, this.importPlugin(file))) === util.sleepTimeout) {
+          pending = files.slice(idx + 1).map(f => f.name)
+          util.makeLog('error', `补拉仍超时（${timeout / 1000} 秒）${logger.red(file.name)}，停止本次补拉`, 'Plugin')
+          break
+        }
+        if (++done % 20 === 0)
+          util.makeLog('info', `补拉进行中 ${done}/${files.length} · 最近 ${file.name}`, 'Plugin')
+      }
+    } finally {
+      this.bulkRetry = false
+      this.buildEventIndex()
+      this.sortPriority()
+      this.createTask()
+      /** 适配器插件是被 import 才算注册的：补拉回来的还要跑一次 load() 才会真正上线 */
+      await import('./events.js')
+        .then(({ listenerLoader }: any) => listenerLoader.loadAdapters())
+        .catch(() => {})
+      const attached = [...this.pluginCountMap.keys()].filter(k => !before.has(k) && this.pluginCountMap.get(k))
+      if (attached.length) util.makeLog('mark', `补拉完成 ${attached.length} 个 · ${logger.green(attached.join(' · '))}`, 'Plugin')
+      if (pending.length)
+        util.makeLog(
+          'error',
+          `还有 ${pending.length} 个文件未补拉：${pending.slice(0, 8).join(' · ')}${pending.length > 8 ? ' …' : ''}\n` +
+            '        根因修好后发 #重载 或重启',
+          'Plugin',
+        )
+    }
   }
 
   /** 迟到的插件（超过 plugin_load_timeout 才就绪）：补进索引与定时任务，避免"下次重载才生效" */
@@ -329,6 +421,8 @@ class PluginsLoader {
     if (!this.loaded || !this.pluginCountMap.get(file.name)) return
     const mine = this.priority.filter(i => i.key === file.name)
     if (!mine.length) return
+    /** 批量补拉期间不逐条重建：buildEventIndex/createTask 都是全量操作，n 条就是 n 次全量重建 */
+    if (this.bulkRetry) return
     this.buildEventIndex()
     this.sortPriority()
     this.createTask()
