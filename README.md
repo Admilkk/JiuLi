@@ -1,5 +1,7 @@
 # JiuLi（玖璃）
 
+**官方文档：<https://hlz7.com/jiuli/>**
+
 兼容 TRSS-Yunzai 生态的机器人框架，内核 TypeScript。
 
 - **旧插件零改动**：云崽插件放进 `plugins/` 即可用，物理路径、全局变量、`e` 对象契约全部保留
@@ -18,7 +20,7 @@ pnpm install && pnpm start     # 装依赖 → 编译内核 → pm2 后台启动
 
 ```bash
 node .
-> #帮助
+> #玖璃帮助
 > #设置主人
 ```
 
@@ -236,7 +238,7 @@ node jiuli.mjs status
 
 改 `lib/**` 手写兼容层不用编译；改 `src/**` 需要 `pnpm build`。
 
-**多实例 / 测试隔离**：`JIULI_CONFIG_DIR` 指定用户配置目录，`JIULI_PLUGINS_DIR` 指定插件目录。
+**多实例 / 测试隔离**：`JIULI_CONFIG_DIR` 指定用户配置目录，`JIULI_PLUGINS_DIR` 指定插件目录。端口冲突时本次启动只报错退出，不会去结束占了端口的那个实例。
 
 **升级排障时不要删** `data/`、`logs/`、`config/config/`——它们是运行状态。要重置就删单个
 `config/config/*.yaml`，下次启动重新生成。

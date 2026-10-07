@@ -58,6 +58,8 @@ export class Demo extends plugin {
 
 规则方法返回 `false` = 放弃这条指令，继续匹配后面的规则与插件。**规则写得宽（例如 `^#更新`）时不要在自己这里先 `reply` 再返回 false** —— 那句回复会挡在别人的同名指令前面（`#更新抽卡记录` 会被 `#更新` 吃掉）。要提示就把话挂到事件上，框架在确实没有插件接手时才补发：
 
+内置插件的 `#帮助` 用的是普通优先级（4000），你的菜单插件用更小的 priority 即可接管它；框架自带的说明另外留了 `#玖璃帮助`，与生态插件的现有指令不冲突，适合作为不会被误接管的入口。
+
 ```js
 async fnc(e) {
   if (!target) {
@@ -76,6 +78,20 @@ async waiting() { this.finish('waiting'); return this.reply(`收到：${this.e.m
 ```
 
 会话按「插件名 + bot + 群/用户」隔离，默认 120 秒超时。
+
+## CJS 依赖
+
+插件用原生 `import()` 加载，Node 自己处理 CJS 互操作：`import COS from 'cos-nodejs-sdk-v5'` 拿到的就是 `module.exports` 本身（包内即使写了 `exports.default` 也不会被优先取用），所以不需要、也不要去猜测"框架改了默认导出"。
+
+`node-fetch` / `md5` / `oicq` 是框架提供的 ESM 壳包，`require` / `import` 两侧都可用。
+
+回调式 SDK 的报错对象直接拼进模板串会变成 `[object Object]`，把线索丢掉。写清楚字段：
+
+```js
+if (err) {
+  logger.error(`[插件名] 读取失败 ${err.code || err.statusCode || err.name}: ${err.message || err.error}`)
+}
+```
 
 ## JiuLi 原生
 

@@ -1,5 +1,7 @@
 # JiuLi
 
+Docs: <https://hlz7.com/jiuli/>
+
 A bot framework compatible with the TRSS-Yunzai plugin ecosystem. TypeScript kernel.
 
 - **Legacy plugins run unmodified** — `lib/**` physical-path shims, global variables
@@ -16,7 +18,7 @@ A bot framework compatible with the TRSS-Yunzai plugin ecosystem. TypeScript ker
 ```bash
 pnpm install && pnpm start     # install → build kernel → start with pm2
 node .                         # foreground: type commands directly in the terminal
-> #帮助
+> #玖璃帮助
 > #设置主人
 ```
 
