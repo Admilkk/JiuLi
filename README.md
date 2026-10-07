@@ -230,9 +230,6 @@ node jiuli a <插件仓库地址>     # 或手动复制目录后 pnpm install
 pnpm build        # 编译内核
 pnpm watch        # 增量编译
 pnpm typecheck    # 仅类型检查
-pnpm test         # 冒烟测试（35 项）
-pnpm test:hot     # 热重载
-pnpm test:ported  # 生态插件适配
 node jiuli.mjs status
 ```
 

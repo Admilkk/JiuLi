@@ -47,6 +47,9 @@ test/.commit-msg
 test/.tmp-*
 test/tmp-*.mjs
 
+# 测试脚本不入库（开发者在本地保留即可）
+test/
+
 # 测试用隔离插件目录
 .tmp-plugins/
 test/.restart-result
