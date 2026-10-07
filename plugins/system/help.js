@@ -2,17 +2,22 @@ import { JiuLiPlugin } from 'jiuli'
 import { PluginsLoader } from 'jiuli/core'
 
 /**
- * #帮助 / #插件列表
+ * #玖璃帮助 / #插件列表
  * 内置指令说明 + 已加载插件与指令一览（转发消息）
  */
 export default class Help extends JiuLiPlugin {
   constructor() {
     super({
       name: '帮助',
-      dsc: '#帮助',
+      dsc: '#玖璃帮助',
       event: 'message',
-      priority: -Infinity,
+      /**
+       * 普通优先级：用户的帮助/菜单插件能抢在它前面接手 #帮助。
+       * 刻意不用默认值 5000，避免和「没写 priority 的插件」同档、位次由加载顺序决定。
+       */
+      priority: 4000,
       rule: [
+        { reg: '^#(玖璃|JiuLi|jiuli)(帮助|菜单)$', fnc: 'help' },
         { reg: '^#帮助$', fnc: 'help' },
         { reg: '^#(插件列表|功能列表|指令列表)$', fnc: 'pluginList' },
       ],
@@ -22,7 +27,7 @@ export default class Help extends JiuLiPlugin {
   async help() {
     const text = [
       'JiuLi 指令说明',
-      '【#帮助】本说明',
+      '【#玖璃帮助】本说明（#帮助 可能被你的菜单插件接管）',
       '【#插件列表】查看已加载插件与指令',
       '【#状态】运行状态与消息统计',
       '【#诊断】排查"机器人为什么没响应"（适配器/在线账号/最近收发）',

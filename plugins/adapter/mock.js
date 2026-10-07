@@ -5,7 +5,7 @@
  * 启动后注册一个假 Bot（self_id = 'mock'），支持两种注入方式：
  *
  * 1. stdin（推荐）：设置环境变量 JIULI_MOCK_STDIN=1，每行一个 JSON 事件：
- *    {"type":"message","group_id":"123456","user_id":"10001","msg":"#帮助"}
+ *    {"type":"message","group_id":"123456","user_id":"10001","msg":"#玖璃帮助"}
  *    {"type":"notice","notice_type":"group","sub_type":"increase","group_id":"123456","user_id":"10001"}
  *
  * 2. 代码注入：globalThis.__jiuli_mock_emit(event)
