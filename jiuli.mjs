@@ -7,7 +7,7 @@
  *   node jiuli.mjs init         安装依赖 + 构建 + 生成配置
  *   node jiuli.mjs start [--fg] 启动（默认 pm2 后台，--fg 前台）
  *   node jiuli.mjs stop|rs|log  停止 / 重启 / 查看日志
- *   node jiuli.mjs build|test|status
+ *   node jiuli.mjs build|status
  */
 import { spawnSync, spawn } from 'node:child_process'
 import { createRequire, builtinModules } from 'node:module'
@@ -321,18 +321,6 @@ function cmdBuild() {
   ok('内核编译完成')
 }
 
-function cmdTest(args = []) {
-  ensureDeps()
-  ensureBuild()
-  const suite = args.includes('--hot')
-    ? 'test/hotreload.mjs'
-    : args.includes('--restart')
-      ? 'test/supervisor-check.mjs'
-      : 'test/smoke.mjs'
-  const ret = run(process.execPath, [suite])
-  process.exit(ret.status ?? 0)
-}
-
 function cmdStatus() {
   const pkg = JSON.parse(fs.readFileSync(path.join(CWD, 'package.json'), 'utf8'))
   console.log(`JiuLi v${pkg.version}`)
@@ -638,11 +626,10 @@ function cmdHelp() {
                                   --name 目录名 可指定插件目录名（URL 写前面）
   build           b             编译内核
   deps            d             扫描 plugins/ 下 JS 插件，一键装齐缺失的依赖（--dry 只看不装）
-  test            t             冒烟测试（--hot 热重载 / --restart 守护进程）
   flush                         清空 pm2 日志文件
   help            h / ?         本说明
 
-  等价 npm scripts：pnpm setup / pnpm start / pnpm stop / pnpm rs / pnpm log / pnpm build / pnpm test
+  等价 npm scripts：pnpm setup / pnpm start / pnpm stop / pnpm rs / pnpm log / pnpm build
 
   服务器上想「进程常驻 + 看实时日志 + 能敲 #重启」，用：
     node jiuli m         启动进 tmux（首次新建，之后接管已有会话）
@@ -699,8 +686,6 @@ const commands = {
   // 开发
   build: cmdBuild,
   b: cmdBuild,
-  test: () => cmdTest(args),
-  t: () => cmdTest(args),
   help: cmdHelp,
   h: cmdHelp,
   '?': cmdHelp,

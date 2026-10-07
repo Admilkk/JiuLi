@@ -24,10 +24,6 @@ node .                         # foreground: type commands directly in the termi
 
 CLI: `node jiuli <command>` (`s` start, `x` stop, `r` restart, `l` log, `st` status, `c` create plugin, `a` add plugin, `b` build).
 
-```bash
-node test/smoke.mjs   # smoke test (legacy + native plugins + render pipeline)
-```
-
 Debug without a protocol backend: `plugins/adapter/mock.js` logs every outgoing message;
 with `JIULI_MOCK_STDIN=1` you can feed one JSON event per line on stdin.
 
