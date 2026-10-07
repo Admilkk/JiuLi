@@ -22,21 +22,35 @@ export default class EventListener {
 }
 
 export class ListenerLoader {
-  async load() {
-    const Bot = (globalThis as any).Bot
+  /** 已执行过 load() 的适配器：补拉/重载后新增的才需要再加载，避免重复初始化 */
+  private loadedAdapters = new WeakSet<object>()
 
+  async load() {
     util.makeLog('info', '加载事件监听器 lib/events/ …', 'Listener')
     const files = (await fs.readdir('./lib/events').catch(() => [] as string[])).filter(f => f.endsWith('.js'))
     const eventPromise = files.map(file => this.loadEvent(file))
     await Promise.allSettled(eventPromise)
     util.makeLog('info', `事件监听器 ${eventPromise.length} 个`, 'Listener')
 
+    await this.loadAdapters()
+  }
+
+  /**
+   * 加载还没初始化过的适配器。
+   *
+   * `Bot.adapter` 由适配器插件在模块顶层 push，超时被牵连、之后补拉回来的适配器文件
+   * 只完成了 import；`load()` 只在启动时跑一次，缺了这一步它们就永远不会被初始化。
+   * 幂等：已加载过的不重复 `load()`（否则会重复起连接/重复注册路由）。
+   */
+  async loadAdapters() {
+    const Bot = (globalThis as any).Bot
+    const adapters = [...(Bot.adapter as any[])].filter(a => !this.loadedAdapters.has(a))
+    if (!adapters.length) return
     util.makeLog('info', '加载适配器 …', 'Adapter')
-    const adapters = [...(Bot.adapter as any[])]
     const adapterPromise = adapters.map(adapter => this.loadAdapter(adapter))
     await Promise.allSettled(adapterPromise)
     const names = adapters.map((a: any) => `${a.name}(${a.id})`).join(' · ')
-    util.makeLog('info', `适配器 ${adapterPromise.length} 个${names ? ` · ${names}` : ''}`, 'Adapter')
+    util.makeLog('info', `适配器 ${adapters.length} 个${names ? ` · ${names}` : ''}`, 'Adapter')
   }
 
   async loadEvent(file: string) {
@@ -59,6 +73,8 @@ export class ListenerLoader {
 
   async loadAdapter(adapter: any) {
     util.makeLog('debug', [`加载适配器 ${adapter.name}(${adapter.id})`], 'Adapter')
+    /** 先登记再 load：load() 抛错也不重试，避免重复起连接 */
+    this.loadedAdapters.add(adapter)
     try {
       await adapter.load()
     } catch (err) {
