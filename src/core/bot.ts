@@ -84,7 +84,6 @@ export default class JiuLiBot extends EventEmitter {
   wsf: Record<string, any[]> = Object.create(null)
   fs: Record<string, any> = Object.create(null)
   fileTimers = new Map<string, NodeJS.Timeout>()
-  server_listen_time = 0
 
   constructor() {
     super()
@@ -352,7 +351,12 @@ export default class JiuLiBot extends EventEmitter {
   }
 
   async serverExit(req: any) {
-    if (req.ip !== '::1' && req.ip !== '::ffff:127.0.0.1') return
+    /**
+     * 只接受本机来源。这里刻意不含 `127.0.0.1`：auth 默认是空的，
+     * 若前面挂了一层 `proxy_pass http://127.0.0.1:<port>` 的反代，外部请求的 req.ip 就是 127.0.0.1，
+     * 加进来等于把「任何人都能远程让机器人退出」打开。要 IPv4 回环发停止请求请先配 server.auth。
+     */
+    if (!['::1', '::ffff:127.0.0.1'].includes(String(req.ip))) return
     this.exit(1)
   }
 
@@ -360,10 +364,18 @@ export default class JiuLiBot extends EventEmitter {
     if (this.stat.online !== 2) return this.once('online', this.wsConnect.bind(this, req, socket, head))
 
     req.rid = `${req.socket.remoteAddress}:${req.socket.remotePort}-${req.headers['sec-websocket-key']}`
-    req.sid = `ws://${
-      req.headers['x-forwarded-host'] || req.headers.host || `${req.socket.localAddress}:${req.socket.localPort}`
-    }${req.url}`
-    req.query = Object.fromEntries(new URL(req.sid).searchParams.entries())
+    const host = req.headers.host || `${req.socket.localAddress}:${req.socket.localPort}`
+    let wsUrl: URL
+    try {
+      /** base 只用字面量：这里只需要 pathname / query，IPv6 形态的 host 不能直接拼进 base */
+      wsUrl = new URL(req.url || '/', 'http://localhost')
+    } catch {
+      /** upgrade 请求的 URL 解析不了时直接 400，别带着 undefined 往下走 */
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+      return socket.destroy()
+    }
+    req.sid = `ws://${host}${req.url}`
+    req.query = Object.fromEntries(wsUrl.searchParams.entries())
     if (this.serverAuth(req) === false) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
       return socket.destroy()
@@ -372,8 +384,9 @@ export default class JiuLiBot extends EventEmitter {
     const msg: any = { headers: req.headers }
     if (Object.keys(req.query).length) msg.query = req.query
 
-    const path = req.url.split('/')[1]
-    if (!(path in this.wsf)) {
+    /** 用 pathname 选处理器：带 query 或多余斜杠时 req.url 切分不可靠 */
+    const path = wsUrl.pathname.split('/').filter(Boolean)[0]
+    if (!path || !(path in this.wsf)) {
       util.makeLog('error', ['WebSocket 处理器', path, '不存在', msg], `${req.sid} <≠> ${req.rid}`, true)
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
       return socket.destroy()
@@ -397,14 +410,26 @@ export default class JiuLiBot extends EventEmitter {
   }
 
   async serverEADDRINUSE(err: any, https?: boolean) {
-    util.makeLog('error', ['监听端口', https ? cfg.server.https.port : cfg.server.port, '错误', err], 'Server')
+    const port = https ? cfg.server.https.port : cfg.server.port
+    util.makeLog('error', ['监听端口', port, '错误', err], 'Server')
     if (https) return
-    try {
-      await fetch(`http://localhost:${cfg.server.port}/exit`, { headers: cfg.server.auth || undefined })
-    } catch {}
-    this.server_listen_time = (this.server_listen_time || 0) + 1
-    await util.sleep(this.server_listen_time * 1000)
-    this.server.listen(cfg.server.port)
+    util.makeLog(
+      'error',
+      `端口 ${port} 已被占用。请先停掉占用的实例（同一个目录重复启动最常见），或改 config/config/server.yaml → server.port 后重启；守护进程会自动重试几次，仍起不来就停下`,
+      'Server',
+    )
+    /**
+     * 端口冲突只结束自己：过去会给占用方发 /exit，对端在 pm2 模式下会连带 pm2 delete，生产条目被抹掉。
+     * 也不能走 this.exit(1)：那在 pm2 模式下执行 `pnpm stop`，会把「端口暂时被占」这种瞬时故障
+     * 变成持久化的 `pm2 delete` + `save`，条目跨重启都回不来。
+     * 以 RESTART_CODE 退出：内部守护进程会重拉（重启/更新窗口内的瞬时冲突能自愈），
+     * 其余守护方式按各自的重启策略处理，且都会在多次失败后停下（见 start.ts 的重拉上限）。
+     */
+    const { RESTART_CODE } = await import('./start.js')
+    /** 同步补齐日志：process.exit 不等异步写，不补就会丢掉刚打的死因 */
+    const { flushLog } = await import('./log.js')
+    flushLog()
+    process.exit(RESTART_CODE)
   }
 
   serverError(err: any, req: any, res: any, _next?: any) {
@@ -502,10 +527,11 @@ export default class JiuLiBot extends EventEmitter {
     file.name = file.name ? encodeURIComponent(file.name) : ulid()
 
     if (typeof times === 'number') file.times = times
+    /** 只编码一次：URL 与 this.fs 的 key 都存这一份，客户端按 URL 原样请求即命中 */
     this.fs[file.name] = file
     this.setFileTimeout(file.name, file, time)
 
-    const url = new URL(`File/${encodeURIComponent(file.name)}`, this.url)
+    const url = new URL(`File/${file.name}`, this.url)
     for (const i in cfg.server.auth) url.searchParams.set(i, cfg.server.auth[i])
     return url
   }

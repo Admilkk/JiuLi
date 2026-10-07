@@ -39,10 +39,21 @@ let writeFile = true
 /** 流式追加写日志，按天分文件 */
 class FileWriter {
   streams = new Map<string, fs.WriteStream>()
+  /** 已交给流、尚未确认落盘的行：进程 exit 时用它同步补齐 */
+  pending = new Map<string, string[]>()
+  /** 已切到同步追加的文件：切了之后不再走流，避免同一批数据被写两次 */
+  synced = new Set<string>()
 
   write(file: string, line: string) {
     if (!writeFile) return
     try {
+      const buf = this.pending.get(file)
+      if (buf) buf.push(line)
+      else this.pending.set(file, [line])
+      if (this.synced.has(file)) {
+        fs.appendFileSync(file, line)
+        return
+      }
       let stream = this.streams.get(file)
       if (!stream) {
         fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -56,7 +67,40 @@ class FileWriter {
     }
   }
 
+  /**
+   * 把还没落盘的行同步写入，并把该文件切到同步追加。
+   *
+   * process.exit 不会等 WriteStream 的异步写，退出前不补齐就会丢掉最后几行
+   * ——端口冲突这类「打一行就退出」的场景，丢的恰好是死因。
+   * 流已经接过的那部分由流自己刷，这里只补它还没拿到的；切换后不再混用两种写，
+   * 否则同一批数据会被写两遍。
+   */
+  flushSync() {
+    for (const [file, lines] of this.pending) {
+      if (!lines.length) continue
+      const text = lines.join('')
+      lines.length = 0
+      if (this.synced.has(file)) continue
+      this.synced.add(file)
+      try {
+        fs.appendFileSync(file, text)
+      } catch {
+        /* 日志写入失败不影响退出 */
+      }
+      /** 流里还压着先前的数据：先让流收尾，再同步写会把顺序打乱，故不主动 end */
+      const stream = this.streams.get(file)
+      if (stream && !stream.closed) {
+        this.streams.delete(file)
+        stream.on('error', () => {})
+        try {
+          stream.end()
+        } catch {}
+      }
+    }
+  }
+
   close() {
+    this.flushSync()
     for (const stream of this.streams.values()) stream.end()
     this.streams.clear()
   }
@@ -285,6 +329,11 @@ logger.setWriteFile = (enable: boolean) => {
 }
 export function setLogDir(dir: string) {
   logDir = dir
+}
+
+/** 退出前同步补齐日志（process.exit 不等异步写，见 FileWriter.flushSync） */
+export function flushLog() {
+  fileWriter.flushSync()
 }
 
 /** 按配置初始化日志等级 */
