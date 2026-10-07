@@ -128,7 +128,9 @@ export default class plugin {
   }
 
   resolveContext(context: any) {
-    this.finish('resolveContext')
+    /** 按上下文对象身份收尾：原先只收用户级，群级等待结束后会继续拦消息直到超时 */
+    for (const isGroup of [false, true])
+      if (this.getContext('resolveContext', isGroup) === context) this.finish('resolveContext', isGroup)
     context?.[SymbolResolve]?.(this.e)
   }
 
