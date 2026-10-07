@@ -58,6 +58,9 @@ export default class Add extends JiuLiPlugin {
     if (!this.keyWord) return this.reply('添加错误：没有关键词')
 
     this.e.keyWord = this.keyWord
+    /** 固定目标群：后续消息（含别人在别的群说话）不能改写它 */
+    this.e.addGroupId = this.group_id
+    this.e.message = []
     this.setContext('addContext')
 
     return this.reply('请发送添加内容，完成后发送#结束添加', true, { at: true })
@@ -124,7 +127,13 @@ export default class Add extends JiuLiPlugin {
   async addContext() {
     const context = this.getContext('addContext')
     this.isGlobal = context.isGlobal
-    await this.getGroupId()
+    /** 用发起时固定的目标群，避免中途被别的群（或别人的消息）改写 */
+    this.group_id = context.addGroupId
+    if (!this.group_id) {
+      this.finish('addContext')
+      return this.reply('添加已失效，请重新添加')
+    }
+    if (!this.isGlobal && this.e.isGroup && String(this.e.group_id) !== String(this.group_id)) return 'continue'
     this.keyWord = context.keyWord
 
     if (!this.e.msg?.includes('#结束添加')) {
