@@ -3,7 +3,7 @@
  */
 import fs from 'node:fs'
 import cfg from './config/index.js'
-import { logger, setLog, setLogDir } from './log.js'
+import { flushLog, logger, setLog, setLogDir } from './log.js'
 import util from './util.js'
 import { redisInit } from './redis.js'
 import { injectGlobals } from './globals.js'
@@ -102,6 +102,8 @@ export async function start() {
       bot.makeLog('mark', logger.magenta(`JiuLi 已停止运行，本次运行时长：${bot.getTimeDiff()} (${code})`), 'exit')
       bot.makeLog('trace', stack || Error().stack, 'exit')
     } catch {}
+    /** 放在最后：上面两行也要落盘。process.exit 不等异步写，不补就会丢最后几行 */
+    flushLog()
   })
 
   await bot.run()
@@ -116,8 +118,15 @@ export const RESTART_CODE = 255
 
 /**
  * 守护进程：在同一终端内拉起/重启主进程
- * 主进程以退出码 255 退出时立即重新拉起；正常退出或崩溃则结束守护。
+ * 主进程以退出码 255 退出时重新拉起；正常退出或崩溃则结束守护。
+ * 255 也用于「端口冲突」等可自愈场景，故设连续失败上限：拉起来就跑不动通常是根因没修
+ * （端口被别的实例长期占用等），此时停下并给指引，比无限重拉刷日志更有用。
  */
+export const MAX_AUTO_RESTARTS = 5
+
+/** 短于这个时长就退出算「没起来」；跑够这么久说明这次重启是正常的，连续失败计数清零 */
+export const FAST_FAIL_MS = 30000
+
 export async function supervise() {
   const { spawn } = await import('node:child_process')
   setLogDir('logs')
@@ -134,8 +143,10 @@ export async function supervise() {
       child?.kill('SIGTERM')
     })
 
+  /** 连续「起来就退」的次数：只有快速失败才累加，稳定运行过一轮（含正常 #重启）就清零 */
   let restarts = 0
   while (!stopping) {
+    const startedAt = Date.now()
     child = spawn(process.execPath, [entry, ...args], {
       stdio: 'inherit',
       env: { ...process.env, app_type: 'internal', JIULI_CHILD: '1' },
@@ -149,7 +160,15 @@ export async function supervise() {
       break
     }
     if (code === RESTART_CODE) {
+      if (Date.now() - startedAt > FAST_FAIL_MS) restarts = 0
       restarts++
+      if (restarts > MAX_AUTO_RESTARTS) {
+        logger.mark(
+          `[Daemon] 已连续重拉 ${MAX_AUTO_RESTARTS} 次都没起来，停止守护进程。` +
+            '常见原因：端口被别的实例占用（确认是否重复启动）或启动期一直报错，修好后重新执行 node .',
+        )
+        break
+      }
       logger.mark(`[Daemon] 主进程请求重启 · 第 ${restarts} 次重新拉起（同一终端，不开新窗口）`)
       await new Promise(r => setTimeout(r, 800))
       continue
