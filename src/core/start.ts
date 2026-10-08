@@ -4,6 +4,7 @@
 import fs from 'node:fs'
 import cfg from './config/index.js'
 import { flushLog, logger, setLog, setLogDir } from './log.js'
+import { consumeReloadFailure, noteCrash } from './reload-hooks.js'
 import util from './util.js'
 import { redisInit } from './redis.js'
 import { injectGlobals } from './globals.js'
@@ -89,6 +90,11 @@ export async function start() {
         console.error(event, e, err)
         process.exit()
       }
+      /**
+       * 热重载里模块求值失败可能被插件自己吞成「部分 apps 载入失败」，
+       * 框架只看到日志、插件却半残。这类失败在这里兜一次自动重启（带节流）。
+       */
+      recoverFromReloadError(bot, e)
     })
 
   let stack: string | undefined
@@ -115,6 +121,30 @@ export async function start() {
 
 /** 子进程请求重启时的退出码（守护进程据此重新拉起） */
 export const RESTART_CODE = 255
+
+/**
+ * 热重载求值失败后的兜底自动重启。
+ *
+ * 触发条件：错误发生在「重载新求值出来的模块」里，且是模块初始化类错误（TDZ 等）。
+ * 覆盖插件自己把 rejection 吞掉、框架只看到日志的场景；changePlugin 那条路已单独处理，
+ * 两边共用 reload-hooks 的状态与节流，所以不会重复重启。
+ */
+function recoverFromReloadError(bot: any, e: any) {
+  if (cfg.bot.reload_restart_on_error === false) return
+  if (!consumeReloadFailure()) return
+  if (!noteCrash()) {
+    logger.error(
+      `[Restart] 重载后模块初始化失败，两分钟内已自动重启过一次，本次不再重启。\n` +
+        '        多为插件「循环 import + 顶层副作用」写法所致；请在插件里把顶层副作用挪进函数，' +
+        '或改完直接重启（config/config/bot.yaml → reload_restart_on_error 可关掉自动重启）',
+    )
+    return
+  }
+  logger.mark('[Restart] 重载后模块初始化失败，2 秒后自动重启恢复')
+  setTimeout(() => {
+    Promise.resolve(bot?.restart?.()).catch(() => process.exit(RESTART_CODE))
+  }, 2000)
+}
 
 /**
  * 守护进程：在同一终端内拉起/重启主进程

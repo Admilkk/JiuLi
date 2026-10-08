@@ -15,7 +15,7 @@ import util from './util.js'
 import { logger } from './log.js'
 import metrics from './metrics.js'
 import { runAsLoading } from './loading.js'
-import { bumpModuleGeneration, enableModuleReload } from './reload-hooks.js'
+import { beginReload, bumpModuleGeneration, enableModuleReload, endReload, failReload, consumeReloadFailure, noteCrash } from './reload-hooks.js'
 import type { JiuLiEvent, PluginEntry } from './types.js'
 
 /** 兼容旧插件直接使用全局 plugin */
@@ -88,6 +88,9 @@ function isEmptyObject(obj: any) {
   for (const _ in obj) return false
   return true
 }
+
+/** 与 start.ts 的 RESTART_CODE 一致：这里不静态引 start.js，避免把 log/config 链拉进 loader */
+const RELOAD_RESTART_CODE = 255
 
 class PluginsLoader {
   /** 赋值时重建事件索引，兼容插件直接替换 priority 的用法 */
@@ -558,6 +561,8 @@ class PluginsLoader {
   async importPlugin(file: { name: string; path: string }, packageErr?: any[]) {
     const start_time = Date.now()
     let success = true
+    /** 求值失败的原因：热重载要据此判断是否属于「求值顺序变了」的失败 */
+    let failReason: any
     this.pluginCountMap.set(file.name, 0)
     /**
      * 在「正在加载 file.name」的上下文里导入，Bot 据此登记该插件注册的 express 路由与
@@ -583,6 +588,7 @@ class PluginsLoader {
         for (const i of await Promise.allSettled(pluginArray))
           if (i?.status && i.status !== 'fulfilled') {
             success = false
+            failReason ||= i.reason
             const info = this.describeLoadError(i.reason, file)
             util.makeLog('error', info.text, 'Plugin')
             util.makeLog('debug', [`${file.name} 加载失败详情`, i.reason], 'Plugin')
@@ -598,6 +604,7 @@ class PluginsLoader {
         Runtime.markEcosystemReady()
     } catch (error: any) {
       success = false
+      failReason = error
       const info = this.describeLoadError(error, file)
       util.makeLog('error', info.text, 'Plugin')
       /** 堆栈只在 debug 级别出现，避免刷屏把后面的启动日志顶掉 */
@@ -624,8 +631,10 @@ class PluginsLoader {
      * 必然落在这个窗口里 —— 是 machineWriteOwner() 区分"机器自激"与"人工编辑"的依据。
      */
     this.loadWindows.set(file.name, { start: start_time, end: Date.now() })
-    /** 加载阶段结束后才就绪（超过 plugin_load_timeout）：补进分发，省得用户手动重载 */
+    /** 加载阶段结束后才就绪的插件（超时补拉）：补进分发，省得用户手动重载 */
     if (success && this.loaded) this.lateAttach(file)
+    /** 重载时求值失败：交给恢复逻辑判断是不是「求值顺序变了」这类失败 */
+    if (!success && failReason) failReload(failReason)
     return success
   }
 
@@ -1424,10 +1433,19 @@ class PluginsLoader {
       bumpModuleGeneration()
       /** 目录型插件需指向 index.js，Node 不支持目录 import */
       const target = key.endsWith('.js') ? key : `${key}/index.js`
-      const success = await this.importPlugin({
-        name: key,
-        path: `../../${this.dir}/${target}?${moment().format('x')}`,
-      })
+      beginReload()
+      let success: boolean
+      try {
+        success = await this.importPlugin({
+          name: key,
+          path: `../../${this.dir}/${target}?${moment().format('x')}`,
+        })
+      } catch (err) {
+        failReload(err)
+        throw err
+      } finally {
+        endReload()
+      }
       if (!success) {
         await this.unloadPlugin(key)
         this.priority.push(...oldPriority)
@@ -1444,12 +1462,53 @@ class PluginsLoader {
       this.sortPriority()
       this.buildEventIndex()
       this.createTask()
+      if (!success) this.recoverReload(key)
       return success
     } catch (err) {
       util.makeLog('error', this.describeLoadError(err, { name: key }).text, 'Plugin')
       util.makeLog('debug', [`${key} 重载失败详情`, err], 'Plugin')
+      this.recoverReload(key)
       return false
     }
+  }
+
+  /**
+   * 热重载求值失败后的恢复。
+   *
+   * 重载会让整张模块图按新顺序重新求值；插件若把循环 import 和顶层副作用混在一起，
+   * 新顺序可能撞上 TDZ（`Cannot access 'Data' before initialization`），而冷启动顺序是好的
+   * —— 表现为「重载后该插件指令全没了，重启才恢复」。这种失败可能被插件自己的
+   * `Promise.allSettled` 吞掉，框架只看到一堆 ERROR，所以这里只能靠重启恢复。
+   *
+   * 用两分钟的节流兜底：真坏到起不来时只重启一次，之后明确提示手动处理，不反复重启。
+   */
+  private recoverReload(key: string) {
+    if (cfg.bot.reload_restart_on_error === false) return
+    if (!consumeReloadFailure()) return
+    if (!noteCrash()) {
+      util.makeLog(
+        'error',
+        `${key} 重载后模块初始化失败，两分钟内已自动重启过一次，本次不再重启。\n` +
+          '        多为插件「循环 import + 顶层副作用」写法所致（热重载会改变求值顺序）；' +
+          '请在插件里把顶层副作用挪进函数，或改完直接重启（config/config/bot.yaml → reload_restart_on_error 可关掉自动重启）',
+        'Plugin',
+      )
+      return
+    }
+    util.makeLog(
+      'mark',
+      `${key} 重载后模块初始化失败（循环依赖 / 顶层副作用在新求值顺序下撞了 TDZ），2 秒后自动重启恢复；本次不重启的话该插件会处于半残状态`,
+      'Restart',
+    )
+    setTimeout(() => {
+      const bot = (globalThis as any).Bot
+      if (typeof bot?.restart === 'function') {
+        /** 走 #重启 同一条路径：先落盘计数与 redis，再由守护进程/pm2 拉起 */
+        Promise.resolve(bot.restart()).catch(() => process.exit(RELOAD_RESTART_CODE))
+        return
+      }
+      process.exit(RELOAD_RESTART_CODE)
+    }, 2000)
   }
 
   /* ==================== 热重载 ==================== */
