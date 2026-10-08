@@ -1575,10 +1575,18 @@ class PluginsLoader {
     /** 新增/补漏加载也换一代：与磁盘上已改过的文件保持一致 */
     bumpModuleGeneration()
     const target = key.endsWith('.js') ? key : `${key}/index.js`
-    await this.importPlugin({ name: key, path: `../../${this.dir}/${target}?${Date.now()}` })
+    /** 同样是「新求值出来的一张图」，求值失败也要能被恢复逻辑认出来 */
+    beginReload()
+    let success: boolean
+    try {
+      success = await this.importPlugin({ name: key, path: `../../${this.dir}/${target}?${Date.now()}` })
+    } finally {
+      endReload()
+    }
     this.sortPriority()
     this.buildEventIndex()
     this.createTask()
+    if (!success) this.recoverReload(key)
   }
 
   /**

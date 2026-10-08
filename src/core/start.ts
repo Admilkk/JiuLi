@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import cfg from './config/index.js'
 import { flushLog, logger, setLog, setLogDir } from './log.js'
-import { consumeReloadFailure, noteCrash } from './reload-hooks.js'
+import { consumeReloadFailure, failReload, noteCrash } from './reload-hooks.js'
 import util from './util.js'
 import { redisInit } from './redis.js'
 import { injectGlobals } from './globals.js'
@@ -93,7 +93,10 @@ export async function start() {
       /**
        * 热重载里模块求值失败可能被插件自己吞成「部分 apps 载入失败」，
        * 框架只看到日志、插件却半残。这类失败在这里兜一次自动重启（带节流）。
+       * 必须先 failReload 把错误交给判定：浮动 rejection 不会经过 changePlugin，
+       * 不给它判一次，consumeReloadFailure 永远是 false，这条分支就形同虚设。
        */
+      failReload(e)
       recoverFromReloadError(bot, e)
     })
 
