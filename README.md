@@ -96,6 +96,8 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 
 卸载插件时会清理它注册的 express 路由与 WebSocket 路径，自带 Web 服务的插件反复重载不会出现路由重复或端口占用。
 
+重载会重新求值整张插件模块图，**求值顺序会变**。插件若把循环 import 和顶层副作用混在一起，重载时可能撞上 `ReferenceError: Cannot access 'x' before initialization`（冷启动顺序恰好是好的）；这种失败可能被插件自己吞掉，表现为「指令全没了但进程还在线」。框架会认出它并自动重启恢复（两分钟内只重启一次，`bot.yaml → reload_restart_on_error: false` 可关），根治办法见[插件指南](docs/plugin-guide.md#热重载与模块级资源)。
+
 `#重载` 只用于自动机制覆盖不到的情况：`#重载` 补漏加载磁盘上还没加载的插件，`#重载 关键词` 强制刷新匹配的插件。
 
 ## 服务器上常驻运行

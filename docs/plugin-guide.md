@@ -164,6 +164,31 @@ async init() {
   占住一张模块图（ESM 缓存不释放旧图），几十秒就能把内存打爆。要落盘就放到运行期（指令 /
   定时任务里）写，并且存成 `config/`、`data/` 下的 `.json` / `.yaml` 这类非 `.js` 文件。
 
+- **别把「循环 import」和「顶层副作用」混在一起**。重载会改变整张模块图的**求值顺序**，
+  而循环依赖下的求值顺序本来就依赖先后：`model/db/BaseModel.js` 顶层就用从 `#index` 来的
+  `Data.createDir(...)`，而 `#index` 又与 `base.js`、`gsCfg.js` 互成环 —— 冷启动时顺序恰好是好的，
+  重载后新顺序会让 `Data` 仍处于 TDZ：
+
+  ```
+  ReferenceError: Cannot access 'Data' before initialization
+      at plugins/xxx/model/db/BaseModel.js?jiuli_reload=2:5:1
+  ```
+
+  这类失败发生在模块求值里，**可能被插件自己的 `Promise.allSettled` 吞掉**，表现是「日志一堆
+  ERROR，但插件指令全没了」。框架会认出这种「重载导致的模块初始化失败」并**自动重启恢复**
+  （新进程的求值顺序回到冷启动那份；两分钟内只自动重启一次，`bot.yaml → reload_restart_on_error: false`
+  可关掉）。根治办法是拆掉环，或把顶层副作用挪进函数、用惰性取值：
+
+  ```js
+  // 别这样：模块顶层就依赖另一个模块的导出
+  import { Data } from '#index'
+  Data.createDir('/data/db', 'root')
+
+  // 改成运行期惰性执行
+  import { Data } from '#index'
+  function ensureDir() { Data.createDir('/data/db', 'root') }
+  ```
+
 - **实例资源**用 `onUnload()` 清理：卸载 / 热重载前框架会调用它（定时器、socket、进程）。
 - **事件监听**（模块顶层 `Bot.on(...)`）与 express 路由、`Bot.wsf` 路径一样由框架**按插件记账**，
   卸载 / 重载时自动移除 —— 这类不用自己管。只有**运行期**（指令、定时任务里）动态挂的监听
