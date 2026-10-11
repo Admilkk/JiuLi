@@ -325,25 +325,12 @@ class PluginsLoader {
     /**
      * 被动中止加载时补齐「少了谁」：插件数少于磁盘文件数不会有别的地方体现，
      * 过去只剩一行插件总数，看不出有插件没进来。
-     * 未导入的文件没有 load_time / pluginCountMap 记录，正好用这一点筛出来。
+     *
+     * 判定必须**推迟**：worker 把文件 shift 出来后要等 import 完成才写 load_time，
+     * 主循环结束时最后几个文件可能正处在这个窗口里 —— 当场判就会把它们误报成
+     * 「本轮未加载」（线上表现是两次启动插件数一样、文件名每次换一个）。
      */
-    const neverImported = files.filter(f => !this.load_time[f.name]).map(f => f.name)
-    if (neverImported.length) {
-      const list = neverImported.slice(0, 8).join(' · ') + (neverImported.length > 8 ? ' …' : '')
-      /** 文案按「实际能补拉的数量」选，避免承诺了不补的文件 */
-      const retryable = this.abandoned.filter(f => neverImported.includes(f.name)).length
-      const hint = retryable
-        ? `其中 ${retryable} 个随后会再补拉一次（补拉结束统一打「补拉完成」），其余要发 #重载 或重启`
-        : '修好后发 #重载 或重启（#重载 不会重跑适配器，适配器缺失只能重启）'
-      util.makeLog(
-        'error',
-        `本轮未加载 ${logger.red(String(neverImported.length))} 个文件（磁盘 ${files.length} 个，已注册插件 ${this.pluginCount} 个）\n` +
-          `        ${list}\n` +
-          (stalledBy ? `        起因：${logger.red(stalledBy)} 导入超时，中止了本轮加载\n` : '') +
-          `        ${hint}`,
-        'Plugin',
-      )
-    }
+    this.reportNeverImported(files, stalledBy)
     /** 并行导入下记录的是"开始加载 → 该插件就绪"（含公共依赖解析开销），不代表插件自身有问题 */
     const sorted = Object.entries(this.load_time).sort((a, b) => b[1] - a[1])
     const slow = sorted.filter(([, t]) => t > 200).slice(0, 8)
@@ -417,6 +404,34 @@ class PluginsLoader {
           'Plugin',
         )
     }
+  }
+
+  /**
+   * 报告本轮没导入的文件（被超时牵连 / 从没轮到）。
+   *
+   * 推迟几秒再判：worker 把文件 shift 出来后要等 import 完成才写 load_time，
+   * 当场判定会把「正在求值」的文件误报成未加载。没导入的文件 load_time 永远不会出现，
+   * 所以推迟不会漏报，只会去掉误报。
+   */
+  private reportNeverImported(files: Array<{ name: string; path: string }>, stalledBy: string) {
+    setTimeout(() => {
+      const neverImported = files.filter(f => !this.load_time[f.name]).map(f => f.name)
+      if (!neverImported.length) return
+      const list = neverImported.slice(0, 8).join(' · ') + (neverImported.length > 8 ? ' …' : '')
+      /** 文案按「实际能补拉的数量」选，避免承诺了不补的文件 */
+      const retryable = this.abandoned.filter(f => neverImported.includes(f.name)).length
+      const hint = retryable
+        ? `其中 ${retryable} 个正在后台补拉（结束会打「补拉完成」），其余要发 #重载 或重启`
+        : '修好后发 #重载 或重启（#重载 不会重跑适配器，适配器缺失只能重启）'
+      util.makeLog(
+        'error',
+        `本轮未加载 ${logger.red(String(neverImported.length))} 个文件（磁盘 ${files.length} 个，已注册插件 ${this.pluginCount} 个）\n` +
+          `        ${list}\n` +
+          (stalledBy ? `        起因：${logger.red(stalledBy)} 导入超时，中止了本轮加载\n` : '') +
+          `        ${hint}`,
+        'Plugin',
+      )
+    }, 5000).unref?.()
   }
 
   /** 迟到的插件（超过 plugin_load_timeout 才就绪）：补进索引与定时任务，避免"下次重载才生效" */
