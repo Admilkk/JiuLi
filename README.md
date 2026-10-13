@@ -12,9 +12,28 @@
 
 ## 快速开始
 
+两种取法，按「要不要自己编译内核」二选一：
+
 ```bash
-pnpm install && pnpm start     # 装依赖 → 编译内核 → pm2 后台启动
+# 已构建版（推荐）：内核已编译好，装上就能跑
+git clone -b release --depth 1 https://github.com/HL-z7/JiuLi.git
+cd JiuLi && pnpm install && pnpm start
+
+# 源码版：跟最新提交 / 要改内核，启动时自动编译
+git clone https://github.com/HL-z7/JiuLi.git
+cd JiuLi && pnpm install && pnpm start
 ```
+
+国内访问 GitHub 慢的话，在地址前加代理前缀 `https://gh-proxy.org/` 即可（clone 友好，分支与 tag 都正常）：
+
+```bash
+git clone -b release --depth 1 https://gh-proxy.org/https://github.com/HL-z7/JiuLi.git
+```
+
+也可以整体换用 Gitee 镜像（分支名一致）：`https://gitee.com/fox-glaze/jiuli.git`。
+
+`master` 的 `lib/core/` 是 tsc 产物、不入库，所以源码版首次启动会多一步编译（CLI 自动做）。
+每次发版会打 tag、建 Release，并把编译好的产物推到 `release` 分支，两个分支内容同步。
 
 调试推荐前台运行，终端里可以直接敲指令：
 
