@@ -1,0 +1,14 @@
+# 服务器地址
+url: http://localhost:1721
+# 服务器端口
+port: 1721
+# 服务器缺省跳转地址
+redirect: https://gitee.com/fox-glaze/jiuli
+# 服务器鉴权
+auth:
+# Authorization: Bearer <access_token>
+https:
+# url: https://localhost:722
+# port: 722
+# key: config/localhost.key
+# cert: config/localhost.crt
