@@ -747,6 +747,8 @@ class PluginsLoader {
     const groupCfg = cfg.getGroup(e.self_id, e.group_id)
     if (!this.checkLimit(e, groupCfg)) return
     this.dealEvent(e, groupCfg)
+    /** 被「只响应主人」静默跳过：不包 reply、不挂 runtime、不打收发日志 */
+    if (e.__skipDeal) return
     if (e.only_reply_at) this.setLimit(e, groupCfg)
     this.reply(e)
     /**
@@ -1073,6 +1075,7 @@ class PluginsLoader {
 
   /** 解析消息，补齐 e.msg / e.img / e.isGroup / e.isMaster 等派生字段 */
   dealEvent(e: JiuLiEvent, groupCfg?: any) {
+    groupCfg ||= cfg.getGroup(e.self_id, e.group_id)
     if (e.message)
       for (const i of e.message) {
         switch (i.type) {
@@ -1135,6 +1138,26 @@ class PluginsLoader {
     }
 
     e.only_reply_at = this.onlyReplyAt(e, groupCfg)
+
+    /** 派生字段齐了，这里才判「只响应主人」：非主人直接静默结束（连"收 ◀"都不打） */
+    if (!this.checkMasterOnly(e, groupCfg)) e.__skipDeal = true
+  }
+
+  /**
+   * 「只响应主人」：群配置层开关（`onlyReplyMaster: 1`），默认关。
+   *
+   * 和 `permission: master` 的区别：那个是按**指令**声明、且会回一句"没有权限"；
+   * 这个是整层过滤，非主人的消息什么都不回（连提示都没有），适合把机器人当私人助手。
+   * 私聊同样受约束 —— 它回答的是"谁能用这个机器人"。
+   *
+   * 必须在派生字段齐了之后调用（e.isMaster 是 dealEvent 里算的），否则会把主人一起拦掉。
+   */
+  checkMasterOnly(e: JiuLiEvent, groupCfg?: any) {
+    groupCfg ||= cfg.getGroup(e.self_id, e.group_id)
+    if (groupCfg.onlyReplyMaster !== 1) return true
+    if (e.isMaster) return true
+    util.makeLog('debug', `onlyReplyMaster 已开启，忽略非主人消息 · ${util.describeScene(e, true)}`, 'Msg')
+    return false
   }
 
   /** 包装 e.reply：拼装 at/引用、记录发送日志，并在失败时捕获异常 */
