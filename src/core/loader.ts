@@ -426,7 +426,11 @@ class PluginsLoader {
    */
   private reportNeverImported(files: Array<{ name: string; path: string }>, stalledBy: string) {
     setTimeout(() => {
-      const neverImported = files.filter(f => !this.load_time[f.name]).map(f => f.name)
+      /**
+       * 必须判「键是否存在」而不是取值真假：导入耗时可能正好是 0ms（命中模块缓存、同一毫秒内完成），
+       * 此时 `!0` 为真，会把已注册的插件误报成未加载（线上表现是插件数不变、文件名每次换几个）。
+       */
+      const neverImported = files.filter(f => !Object.hasOwn(this.load_time, f.name)).map(f => f.name)
       if (!neverImported.length) return
       const list = neverImported.slice(0, 8).join(' · ') + (neverImported.length > 8 ? ' …' : '')
       /** 文案按「实际能补拉的数量」选，避免承诺了不补的文件 */
