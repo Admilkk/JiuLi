@@ -207,7 +207,8 @@ function cmdAttach() {
 
 /** 依赖检查 */
 function ensureDeps({ auto = true } = {}) {
-  if (fs.existsSync(path.join(CWD, 'node_modules', 'typescript'))) return true
+  /** 判运行时依赖：release 分支是预编译产物，package.json 里没有 devDependencies（不含 typescript） */
+  if (fs.existsSync(path.join(CWD, 'node_modules', 'ws'))) return true
   if (!auto) return false
   info('未检测到依赖，正在安装（pnpm install）…')
   const ret = run('pnpm', ['install'])
