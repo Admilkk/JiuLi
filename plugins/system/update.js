@@ -257,6 +257,18 @@ export default class Update extends JiuLiPlugin {
 
   /** 重新编译内核（仅框架本体更新后需要） */
   async build() {
+    /**
+     * release 分支是编译好的产物：没有 src/、也没有 devDependencies，既不需要也编译不了。
+     * 这里直接视为成功，否则每次更新都会报「内核编译失败」。
+     */
+    const hasSrc = await fs
+      .access(path.join(process.cwd(), 'src'))
+      .then(() => true)
+      .catch(() => false)
+    if (!hasSrc) {
+      Bot.makeLog('mark', '当前为已编译分支（无 src/），跳过内核编译', 'Update')
+      return true
+    }
     const ret = await this.exec('pnpm build', '')
     if (ret.error) {
       await this.reply(
