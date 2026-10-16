@@ -34,6 +34,44 @@ export async function isSnapBrowser(p) {
   }
 }
 
+/** 浏览器可执行文件的常见名字：chromium_path 写成目录 / .app 时按这些名字往里找 */
+const BROWSER_BINARIES = [
+  'Google Chrome for Testing',
+  'Google Chrome',
+  'Chromium',
+  'Microsoft Edge',
+  'chrome',
+  'chromium',
+  'msedge',
+  'chrome-headless-shell',
+]
+
+/**
+ * 把「目录 / .app 包」补全成可执行文件；已是文件或找不到时返回空串。
+ *
+ * macOS 上 chromium_path 常被写成 `…/Google Chrome for Testing.app/Contents/MacOS`（目录），
+ * 甚至直接写 `.app` 包 —— 这两种都往里找一层。配置只接受文件时，这类写法会被静默忽略、
+ * 然后照旧去下载浏览器，用户只会看到「配置没生效」。
+ */
+export async function resolveBrowserBinary(p) {
+  if (!p) return ''
+  const isFile = async f => {
+    try {
+      return (await fs.stat(f)).isFile()
+    } catch {
+      return false
+    }
+  }
+  /** .app 包和 Contents/MacOS 目录都当作「里面放二进制」的目录 */
+  const dirs = [p, path.join(p, 'Contents', 'MacOS')]
+  for (const dir of dirs)
+    for (const name of BROWSER_BINARIES) {
+      const full = path.join(dir, name)
+      if (await isFile(full)) return full
+    }
+  return ''
+}
+
 export default class Puppeteer extends Renderer {
   constructor(config) {
     super({
@@ -113,16 +151,35 @@ export default class Puppeteer extends Renderer {
     }
 
     const configured = this.config.executablePath
-    if (configured && (await isFile(configured))) {
-      if (await isSnapBrowser(configured))
-        Bot.makeLog(
-          'warn',
-          `配置的浏览器是 snap 版（${configured}）：snap 沙箱常导致截图缺内容/白屏\n` +
-            '  建议换成系统版 Chrome/Chromium，或在 config/config/bot.yaml 里把 chromium_path 指到别的浏览器',
-          'Render',
-        )
-      else Bot.makeLog('info', `使用配置的浏览器 · ${configured}`, 'Render')
-      return configured
+    if (configured) {
+      /** 配置也可能是目录 / .app（macOS 常见写法）：补全成可执行文件再用 */
+      const resolved = (await isFile(configured)) ? configured : await resolveBrowserBinary(configured)
+      if (resolved) {
+        if (await isSnapBrowser(resolved))
+          Bot.makeLog(
+            'warn',
+            `配置的浏览器是 snap 版（${resolved}）：snap 沙箱常导致截图缺内容/白屏\n` +
+              '  建议换成系统版 Chrome/Chromium，或在 config/config/bot.yaml 里把 chromium_path 指到别的浏览器',
+            'Render',
+          )
+        else
+          Bot.makeLog(
+            'info',
+            resolved === configured
+              ? `使用配置的浏览器 · ${configured}`
+              : `使用配置的浏览器 · ${resolved}（由 ${configured} 补全）`,
+            'Render',
+          )
+        return resolved
+      }
+      Bot.makeLog(
+        'warn',
+        `配置的 chromium_path 用不了：${configured}\n` +
+          '  这里要指向浏览器可执行文件本身，macOS 上形如\n' +
+          '  …/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\n' +
+          '  已忽略该配置，继续自动选择；一个都找不到时会自动下载（约 150MB）',
+        'Render',
+      )
     }
 
     /** puppeteer 自带缓存（装了才会命中） */
