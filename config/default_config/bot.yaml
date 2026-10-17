@@ -19,6 +19,10 @@ no_handler_tip: false
 no_handler_tip_prefix: "#"
 # 插件加载超时
 plugin_load_timeout: 60
+# V8 老生代上限（MB）。0 = 交给 Node 按物理内存自动定（2GB 机器约 1GB，所以 RSS 能冲到 1GB+）
+# 设成 512 会让 GC 更早介入：RSS 稳定在 450~550MB，代价是 GC 稍勤；只影响回收时机，不减少真实数据
+# 一键设置：node jiuli tune（同时调渲染的 idleTime / restartNum）
+max_old_space_size: 0
 # 热重载时模块初始化失败（循环 import + 顶层副作用在重载的新求值顺序下撞 TDZ）就自动重启恢复：
 # 这类失败插件自己可能吞掉，插件会处于半残状态，重启后求值顺序回到冷启动那份即恢复
 reload_restart_on_error: true
