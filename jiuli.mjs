@@ -14,6 +14,7 @@ import { createRequire, builtinModules } from 'node:module'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { applyTune, hasTuneBackup, readNumber, readTune, revertTune, TUNE_DEFAULTS } from './lib/tune.js'
 
 const CWD = process.cwd()
 const nodeBuiltins = new Set(builtinModules)
@@ -148,6 +149,7 @@ function cmdSession(args = []) {
   ensureDeps()
   ensureBuild()
   ensureConfig()
+  applyNodeOptions()
 
   /** 已经身处 tmux / screen 里就不用再套一层，直接跑（screen 用 STY 标识） */
   if (process.env.TMUX || process.env.STY) {
@@ -252,6 +254,79 @@ function ensureConfig() {
   info('首次启动将自动生成 config/config/（默认配置）')
 }
 
+/**
+ * 把 bot.yaml 的 max_old_space_size 注入接下来启动的 bot 进程。
+ * Node 不接受运行中改老生代上限，只能靠 NODE_OPTIONS 传给子进程；
+ * pm2 模式走 config/pm2.yaml 的 node_args（由 node jiuli tune 写入）。
+ */
+function applyNodeOptions() {
+  const file = [
+    path.join(CWD, 'config', 'config', 'bot.yaml'),
+    path.join(CWD, 'config', 'default_config', 'bot.yaml'),
+  ].find(f => fs.existsSync(f))
+  if (!file) return
+  let size = 0
+  try {
+    size = readNumber(fs.readFileSync(file, 'utf8'), 'max_old_space_size') || 0
+  } catch {
+    return
+  }
+  if (!(size > 0)) return
+  if (String(process.env.NODE_OPTIONS || '').includes('--max-old-space-size')) return
+  process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS || ''} --max-old-space-size=${size}`.trim()
+  info(`V8 老生代上限 ${size}MB（config/config/bot.yaml → max_old_space_size）`)
+}
+
+/** 一键内存优化：写配置 + 提示生效方式；--revert 按优化前的备份还原 */
+function cmdTune(args = []) {
+  const { flags, values } = parseArgs(args, {
+    flags: ['--show', '-s', '--revert', '--restore'],
+    values: ['--heap', '--idle', '--restart-num'],
+    usage: '用法：node jiuli tune [--heap 512] [--idle 10] [--restart-num 50] | --show | --revert',
+  })
+
+  if (flags.has('--revert') || flags.has('--restore')) {
+    const { restored, fallback } = revertTune(CWD)
+    if (restored.length) {
+      ok('已还原到优化前：')
+      for (const r of restored) console.log(`  ${r}（从 .tune-bak 恢复）`)
+    } else if (fallback.length) {
+      warn('没找到优化前的备份，已写回框架默认值：')
+      for (const f of fallback) console.log(`  ${f}`)
+    } else {
+      return ok('没有需要还原的配置')
+    }
+    info('生效方式：重启 CLI 会话（node jiuli m）；pm2 模式用 node jiuli stop && node jiuli start')
+    return
+  }
+
+  const fmt = v => (v === undefined || v === null ? '未配置' : v)
+  const cur = readTune(CWD)
+
+  if (flags.has('--show') || flags.has('-s')) {
+    info('当前内存相关配置：')
+    console.log(`  config/config/bot.yaml → max_old_space_size : ${fmt(cur.heap)}`)
+    console.log(`  renderers/puppeteer/config.yaml → idleTime  : ${fmt(cur.idle)}（分钟，0=不自动关）`)
+    console.log(`  renderers/puppeteer/config.yaml → restartNum: ${fmt(cur.restartNum)}（张）`)
+    console.log(`  优化前备份：${hasTuneBackup(CWD) ? '有（node jiuli tune --revert 可还原）' : '无'}`)
+    info(`推荐值：${TUNE_DEFAULTS.heap} / ${TUNE_DEFAULTS.idle} / ${TUNE_DEFAULTS.restartNum}，执行 node jiuli tune 应用`)
+    return
+  }
+
+  const { changes, values: applied } = applyTune(CWD, {
+    heap: values.get('--heap'),
+    idle: values.get('--idle'),
+    restartNum: values.get('--restart-num'),
+  })
+  if (!changes.length) return ok('已是最优配置，无需改动')
+  ok('已应用内存优化：')
+  for (const c of changes) console.log(`  ${c}`)
+  info(`生效方式：重启 CLI 会话（node jiuli m）后，新进程才会带 --max-old-space-size=${applied.heap}`)
+  info('pm2 模式请用 node jiuli stop && node jiuli start（pm2 restart 不重读 pm2.yaml）')
+  info('想还原：node jiuli tune --revert')
+  info('想再压低运行时缓存占用，可配合定时重启：config/config/bot.yaml → restart_cron')
+}
+
 /* ---------------- 命令 ---------------- */
 
 function cmdInit() {
@@ -274,6 +349,7 @@ function cmdStart(args) {
   ensureDeps()
   ensureBuild()
   ensureConfig()
+  applyNodeOptions()
 
   if (fg) {
     info('前台启动（Ctrl+C 退出）…')
@@ -625,6 +701,7 @@ function cmdHelp() {
   create <名称>    c             生成插件骨架（--dsl 函数式 / --dir 独立目录）
   add <git地址>    a             安装第三方插件（克隆到 plugins/ 并装依赖）
                                   --name 目录名 可指定插件目录名（URL 写前面）
+  tune                         一键内存优化（堆上限/浏览器释放），--show 查看、--revert 还原
   build           b             编译内核
   deps            d             扫描 plugins/ 下 JS 插件，一键装齐缺失的依赖（--dry 只看不装）
   flush                         清空 pm2 日志文件
@@ -681,6 +758,8 @@ const commands = {
   st: cmdStatus,
   info: cmdStatus,
   flush: cmdFlush,
+  // 优化
+  tune: () => cmdTune(args),
   // 依赖
   deps: () => cmdDeps(args),
   d: () => cmdDeps(args),

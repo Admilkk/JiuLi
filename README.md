@@ -60,7 +60,7 @@ CLI 用法 `node jiuli <命令>`（等价 `pnpm jiuli`）：
 | `attach` | `at` | 接回 tmux/screen 会话（实时日志 + 可输入指令） |
 | `build` | `b` | 编译内核 |
 | `deps` | `d` | 扫描 `plugins/` 下 JS 插件的 import，一键装齐缺失依赖（`--dry` 只看不装） |
-| `test` | `t` | 跑测试（`--hot` / `--restart`） |
+| `tune` |  | 一键内存优化：堆上限 512MB、浏览器空闲 10 分钟关闭、50 张重启（`--show` 查看 / `--revert` 还原） |
 
 启动模式：
 
