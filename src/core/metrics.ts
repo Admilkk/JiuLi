@@ -8,7 +8,8 @@ class Metrics {
   map = new Map<string, PluginMetric>()
   private warned = new Map<string, number>()
 
-  record(entry: PluginEntry, ms: number) {
+  /** scene：这次执行的触发场景（群/用户），带上才能看出是「谁」把它跑慢的 */
+  record(entry: PluginEntry, ms: number, scene = '') {
     if (cfg.getPerf().metrics === false) return
     const key = entry.key
     let metric = this.map.get(key)
@@ -29,7 +30,11 @@ class Metrics {
       // 同一插件 60s 内只告警一次
       if (Date.now() - last > 60000) {
         this.warned.set(key, Date.now())
-        util.makeLog('warn', `${entry.name}(${key}) 本次耗时 ${ms}ms，超过阈值 ${threshold}ms`, '慢插件')
+        util.makeLog(
+          'warn',
+          `${entry.name}(${key}) 本次耗时 ${ms}ms，超过阈值 ${threshold}ms${scene ? ` · ${scene}` : ''}`,
+          '慢插件',
+        )
       }
     }
   }

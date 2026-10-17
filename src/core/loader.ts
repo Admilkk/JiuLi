@@ -922,7 +922,7 @@ class PluginsLoader {
               const args: any[] = fn?.length >= 2 ? [e, (v.reg as RegExp).exec(String(e.msg)) || undefined] : [e]
               const res = fn && (await fn(...args))
               const cost = Date.now() - startTime
-              metrics.record(i, cost)
+              metrics.record(i, cost, util.describeScene(e))
 
               if (res === false) {
                 util.makeLog(
@@ -934,7 +934,7 @@ class PluginsLoader {
               }
               util.makeLog(
                 v.log === false ? 'debug' : 'mark',
-                `完成 ${logger.green.bold(i.name)} · ${util.colorCost(cost)}`,
+                `完成 ${logger.green.bold(i.name)} · ${util.colorCost(cost)} · ${util.describeScene(e)}`,
                 'Plugin',
               )
             } catch (err) {
@@ -942,7 +942,7 @@ class PluginsLoader {
                 'error',
                 util.describeError(
                   err,
-                  `执行出错 ${logger.green.bold(i.name)} <${i.key}>`,
+                  `执行出错 ${logger.green.bold(i.name)} <${i.key}> · ${util.describeScene(e)}`,
                   '插件自身的问题：本次指令未完成，其他插件与启动都不受影响（完整堆栈：log_level: debug）',
                 ),
                 'Plugin',
