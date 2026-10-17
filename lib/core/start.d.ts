@@ -13,4 +13,8 @@ export declare const RESTART_CODE = 255;
 export declare const MAX_AUTO_RESTARTS = 5;
 /** 短于这个时长就退出算「没起来」；跑够这么久说明这次重启是正常的，连续失败计数清零 */
 export declare const FAST_FAIL_MS = 30000;
+/** 配置里的 V8 老生代上限（MB），0 = 不注入 */
+export declare function heapCap(): number;
+/** 拉子进程时要拼在 argv 前的参数；每轮重新读配置，所以改完 max_old_space_size 后 #重启 即生效 */
+export declare function heapCapArgs(): string[];
 export declare function supervise(): Promise<void>;
