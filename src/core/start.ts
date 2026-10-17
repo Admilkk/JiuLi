@@ -160,6 +160,18 @@ export const MAX_AUTO_RESTARTS = 5
 /** 短于这个时长就退出算「没起来」；跑够这么久说明这次重启是正常的，连续失败计数清零 */
 export const FAST_FAIL_MS = 30000
 
+/** 配置里的 V8 老生代上限（MB），0 = 不注入 */
+export function heapCap(): number {
+  const n = Number(cfg.bot.max_old_space_size ?? 0)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+/** 拉子进程时要拼在 argv 前的参数；每轮重新读配置，所以改完 max_old_space_size 后 #重启 即生效 */
+export function heapCapArgs(): string[] {
+  const n = heapCap()
+  return n ? [`--max-old-space-size=${n}`] : []
+}
+
 export async function supervise() {
   const { spawn } = await import('node:child_process')
   setLogDir('logs')
@@ -180,7 +192,12 @@ export async function supervise() {
   let restarts = 0
   while (!stopping) {
     const startedAt = Date.now()
-    child = spawn(process.execPath, [entry, ...args], {
+    /**
+     * 每轮都按当前配置注入堆上限：守护进程自身改不了（它已经起来了），但子进程可以，
+     * 这样 tune 或手改配置之后 `#重启` 就能生效，不必重开 CLI 会话。
+     * 配置文件优先于启动时继承下来的 NODE_OPTIONS（后者可能是旧值）。
+     */
+    child = spawn(process.execPath, [...heapCapArgs(), entry, ...args], {
       stdio: 'inherit',
       env: { ...process.env, app_type: 'internal', JIULI_CHILD: '1' },
     })

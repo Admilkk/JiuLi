@@ -296,7 +296,7 @@ function cmdTune(args = []) {
     } else {
       return ok('没有需要还原的配置')
     }
-    info('生效方式：重启 CLI 会话（node jiuli m）；pm2 模式用 node jiuli stop && node jiuli start')
+    info('生效方式：#重启；pm2 模式用 node jiuli stop && node jiuli start')
     return
   }
 
@@ -321,7 +321,7 @@ function cmdTune(args = []) {
   if (!changes.length) return ok('已是最优配置，无需改动')
   ok('已应用内存优化：')
   for (const c of changes) console.log(`  ${c}`)
-  info(`生效方式：重启 CLI 会话（node jiuli m）后，新进程才会带 --max-old-space-size=${applied.heap}`)
+  info(`生效方式：#重启 即可（守护进程按配置注入 --max-old-space-size=${applied.heap}）`)
   info('pm2 模式请用 node jiuli stop && node jiuli start（pm2 restart 不重读 pm2.yaml）')
   info('想还原：node jiuli tune --revert')
   info('想再压低运行时缓存占用，可配合定时重启：config/config/bot.yaml → restart_cron')
