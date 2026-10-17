@@ -3,7 +3,8 @@ import type { PluginEntry, PluginMetric } from './types.js';
 declare class Metrics {
     map: Map<string, PluginMetric>;
     private warned;
-    record(entry: PluginEntry, ms: number): void;
+    /** scene：这次执行的触发场景（群/用户），带上才能看出是「谁」把它跑慢的 */
+    record(entry: PluginEntry, ms: number, scene?: string): void;
     remove(key: string): void;
     list(): PluginMetric[];
     reset(): void;
