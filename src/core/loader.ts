@@ -879,7 +879,16 @@ class PluginsLoader {
         for (const v of i.plugin.rule) {
           if (v.event && !this.filtEvent(e, v)) continue
 
-          const regStr = String(v.reg)
+          /**
+           * 规则源码可能极长（meme 类插件把几百条词条塞进一个正则，几十 KB），
+           * 原样打进日志会把整行刷屏，也会让日志文件暴涨 —— 这里只留开头。
+           */
+          /**
+           * 规则源码可能极长（meme 类插件把几百条词条塞进一个正则，几十 KB），
+           * 原样打进日志会刷屏、并让日志文件暴涨 —— 上限见 bot.yaml 的 log_rule_length（0 = 不截断）。
+           */
+          const regMax = Number(cfg.bot.log_rule_length ?? 80)
+          const regStr = regMax > 0 ? util.truncate(String(v.reg), regMax) : String(v.reg)
           if (!(v.reg as RegExp).test(String(e.msg))) continue
 
           const instance = getInstance(i)

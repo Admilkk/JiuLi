@@ -12,6 +12,9 @@ log_dedupe: 10
 log_msg: true
 # 消息内容预览长度
 log_msg_length: 60
+# 规则命中日志里「规则」最多显示多少字符（0 = 不截断）
+# 词条类插件常把几百条词塞进一个正则（几十 KB），原样打印会刷屏，也会让日志文件暴涨
+log_rule_length: 80
 # 指令命中了规则但没有插件响应时，主动提示一句（如非主人使用主人指令）
 # 只在以 no_handler_tip_prefix 开头的消息上提示，避免普通聊天被插件的宽泛规则匹配后也回一句
 no_handler_tip: false
