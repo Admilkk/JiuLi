@@ -261,6 +261,26 @@ node jiuli.mjs status
 **升级排障时不要删** `data/`、`logs/`、`config/config/`——它们是运行状态。要重置就删单个
 `config/config/*.yaml`，下次启动重新生成。
 
+### 版本与发布
+
+发布由 release-please 依据 conventional commits 自动判断，**默认走小版本（patch）**：
+
+| 提交类型 | 版本变化 | 用途 |
+| --- | --- | --- |
+| `fix` / `perf` / `refactor` / `docs` / `test` / `chore` | 3.4.0 → **3.4.1** | 日常改动、小功能、体验优化 |
+| `feat` | 3.4.x → **3.5.0** | 只给确实重大的新能力 |
+| `feat!` / `BREAKING CHANGE` | → **4.0.0** | 破坏性变更 |
+
+一批改动里混了 `feat` 但整体算不上大版本时，在提交正文里加一行 footer 压成 patch：
+
+```
+feat: xxx
+
+Release-As: 3.4.1
+```
+
+release-please 会按这个版本出 Release PR（合并后才生效，平时不用写）。
+
 ## 许可
 
 AGPL-3.0，与 TRSS-Yunzai 一致。本项目是其重构版本，保留原作者（TimeRainStarSky、Yoimiya-Kokomi、
