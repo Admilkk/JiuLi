@@ -23,6 +23,7 @@ export declare class RendererLoader {
     get browserIsOpen(): boolean;
     /** 重启浏览器（下次截图时重新拉起） */
     restart(force?: boolean): Promise<any>;
+    /** 关闭浏览器（退出/重启前调用）；没有运行中的实例时直接返回 */
     stop(): Promise<any>;
 }
 declare const _default: RendererLoader;
