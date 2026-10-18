@@ -531,11 +531,7 @@ export default class Puppeteer extends Renderer {
       if (this.shoting.length || this.lock || this.config.wsEndpoint) return
       if (!this.browser?.close) return
       Bot.makeLog('mark', `空闲 ${this.idleTime / 60000} 分钟，关闭 Chromium 释放内存（下次截图自动启动）`, 'Render')
-      const browser = this.browser
-      this.browser = false
-      /** Browser 只有 on / off，没有 removeListener（用旧 API 会抛错，导致浏览器永远关不掉） */
-      if (typeof browser.off === 'function') browser.off('disconnected', this.onDisconnected)
-      this.stop(browser).then(() => this.browserMacKey && redis.del(this.browserMacKey).catch(() => {}))
+      this.stop(this.browser).then(() => this.browserMacKey && redis.del(this.browserMacKey).catch(() => {}))
     }, this.idleTime)
     this.idleTimer.unref?.()
   }
@@ -550,7 +546,17 @@ export default class Puppeteer extends Renderer {
     return this.stop(browser).then(() => this.browserInit())
   }
 
-  async stop(browser) {
+  /**
+   * 关闭浏览器实例（不传则关当前实例）
+   *
+   * browser.close() 自己会触发 disconnected，而监听器 onDisconnected 就是 restart(true)：
+   * 不先摘掉它，退出/空闲关闭的过程中会再拉起一个新的 Chromium。
+   */
+  async stop(browser = this.browser) {
+    if (this.browser === browser) this.browser = false
+    if (!browser?.close) return
+    /** Browser 只有 on / off，没有 removeListener（用旧 API 会抛错，导致浏览器永远关不掉） */
+    if (typeof browser.off === 'function') browser.off('disconnected', this.onDisconnected)
     try {
       await browser.close()
     } catch (err) {
