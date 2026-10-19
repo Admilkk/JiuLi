@@ -177,6 +177,8 @@ export default class JiuLiBot extends EventEmitter {
   private pluginWs = new Map<string, Set<string>>()
   /** 插件在加载期挂的事件监听：key → [{ event, listener }] */
   private pluginListeners = new Map<string, Array<{ event: string | symbol; listener: (...args: any[]) => any }>>()
+  /** run() 末尾注册的兜底重定向 / 错误处理层；插件热重载追加路由后要把它们挪回末尾 */
+  private fallbackLayers: any[] = []
 
   /**
    * 当前正在加载的插件 key（由 loader 在 import 前后设置）。
@@ -202,6 +204,12 @@ export default class JiuLiBot extends EventEmitter {
           let set = this.pluginLayers.get(key)
           if (!set) this.pluginLayers.set(key, (set = new Set()))
           for (const layer of router.stack.slice(before, after)) set.add(layer)
+          /**
+           * 热重载会重新 app.use()，新路由是 append 到 stack 末尾的，而兜底重定向 / 错误处理
+           * 是启动完成时才注册的。不挪回去的话请求会先命中兜底 → 全部 302 空 Location
+           * （表现就是面板打开一片 "Found. Redirecting to"）。
+           */
+          this.ensureFallbackLast()
         }
         return ret
       }
@@ -255,6 +263,27 @@ export default class JiuLiBot extends EventEmitter {
         return orig(event, listener)
       }
     }
+  }
+
+  /**
+   * 把兜底重定向 / 错误处理层挪到 express 栈末尾。
+   *
+   * express 先注册先匹配，兜底必须在最后。启动时它们确实最后注册，但热重载的插件会重新
+   * app.use()，新 layer 追加到末尾就把兜底顶到了前面 —— 正常启动后一直好好的，一改插件
+   * 文件（不重启）面板就变 302 空白页，根因就在这里。
+   */
+  private ensureFallbackLast() {
+    if (!this.fallbackLayers.length) return
+    const router = this.express?.router || this.express?._router
+    const stack = router?.stack
+    if (!stack) return
+    const set = new Set(this.fallbackLayers)
+    const firstIndex = stack.findIndex((layer: any) => set.has(layer))
+    if (firstIndex === -1) return
+    /** 兜底之后还有别的层才需要挪，避免每次注册都白动一遍 */
+    if (!stack.slice(firstIndex).some((layer: any) => !set.has(layer))) return
+    for (let i = stack.length - 1; i >= 0; i--) if (set.has(stack[i])) stack.splice(i, 1)
+    stack.push(...this.fallbackLayers)
   }
 
   /** 插件卸载/重载前清理它注册的路由与 WS 路径 */
@@ -619,7 +648,11 @@ export default class JiuLiBot extends EventEmitter {
     await loadEvents()
 
     this.stat.online = 2
+    const fallbackRouter = this.express.router || this.express._router
+    const fallbackBefore = fallbackRouter?.stack?.length ?? 0
     this.express.use((req: any) => req.res.redirect(cfg.server.redirect)).use(this.serverError.bind(this))
+    /** 记下这两层，插件热重载后由 ensureFallbackLast 挪回末尾 */
+    this.fallbackLayers = fallbackRouter?.stack?.slice(fallbackBefore) ?? []
     util.makeLog(
       'info',
       `连接地址：${logger.blue(`${this.url.replace(/^http/, 'ws')}/`)}${logger.cyan(`[${Object.keys(this.wsf)}]`)}`,
