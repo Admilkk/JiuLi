@@ -51,6 +51,35 @@ export default class JiuLiBot extends EventEmitter {
         ws: number;
         listeners: number;
     };
+    /** 鉴权失败计数（仅公网来源），用于阻断暴力尝试 */
+    private authFails;
+    /** 回环地址（含 IPv4 映射形态） */
+    isLoopback(addr: any): boolean;
+    /**
+     * 是否本机直连。
+     * 反向代理会把公网请求变成 127.0.0.1，所以带转发头的回环请求按外部处理，
+     * 否则在 nginx 后面挂一层就等于没鉴权。转发头被伪造只会让自己被拒，不会放行。
+     */
+    private isLocalRequest;
+    /** 常数时间比较：先摘要再比较，长度不同也不提前返回 */
+    private safeEqual;
+    /**
+     * 校验 server.auth。携带方式：同名请求头、`Authorization: Bearer <token>`、query 参数，
+     * 任一配置项命中即放行（沿用旧语义）。
+     */
+    private checkAuth;
+    /**
+     * server.public：不需要 token 的路径前缀。
+     * 面板自带登录（会话 / JWT），`/File` 是带 ULID 的一次性文件地址（要发给 QQ 客户端取图），
+     * 这两类没有 token 也必须能访问。其余路径一律走鉴权。
+     */
+    private isPublicPath;
+    /** 公网鉴权失败限流：同一 IP 10 分钟内失败超过 20 次直接 429 */
+    private hitAuthFail;
+    /** 拒绝请求：express 请求回状态码，WebSocket 握手由 wsConnect 自己写 401 */
+    private denyAuth;
+    /** 基础安全响应头：面板都是同源 iframe，SAMEORIGIN 足够 */
+    serverSecurity(req: any, res: any, next: any): void;
     serverAuth(req: any): any;
     serverStatus(req: any): void;
     serverHandle(req: any): void;

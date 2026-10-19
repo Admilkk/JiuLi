@@ -118,6 +118,8 @@ Bot.adapter.push(
         message: [{ type: 'text', text: msg }],
         raw_message: msg,
       }
+      // Symbol 不参与 JSON 序列化，网络侧伪造的 stdin 事件带不上这个标记
+      data[Symbol.for('jiuli.internal.stdin')] = true
       Bot.makeLog('info', `系统消息: ${data.raw_message}`, this.id)
       Bot.em(`${data.post_type}.${data.message_type}`, data)
     }
