@@ -120,6 +120,8 @@ class PluginsLoader {
   singleCD: Record<string, boolean> = {}
   /** 消息去重（1s） */
   msgThrottle: Record<string, boolean> = {}
+  /** 禁言窗口：`self_id:group_id` → 截止时间戳（发送失败反推出来的） */
+  private muted = new Map<string, number>()
 
   watcher: Record<string, any> = {}
   /**
@@ -1192,6 +1194,12 @@ class PluginsLoader {
     e.reply = async (msg: any = '', quote = false, data: any = {}) => {
       if (!msg) return false
 
+      /** 群被禁言窗口内连试都不试：发出去只会再拿一次 120，还刷一屏 ERROR */
+      if (this.isMuted(e)) {
+        util.makeLog('debug', `群 ${e.group_id} 禁言中，跳过发送 · ${util.truncate(util.describeMsg(msg), 40)}`, 'Msg')
+        return false
+      }
+
       let { recallMsg = 0, at = '' } = data
       const segment = (globalThis as any).segment
 
@@ -1211,9 +1219,17 @@ class PluginsLoader {
       try {
         res = await reply(msg)
       } catch (err) {
-        util.makeLog('error', ['发送消息错误', msg, err], e.self_id)
         res = { error: [err] }
       }
+
+      const failed = hasSendError(res)
+      /**
+       * 被禁言是群状态，不是框架故障（icqq 会先打一条 failed to send，我们再刷一屏堆栈也没用）。
+       * 记下窗口后直接跳过该群，下一条消息走 checkLimit 就不会再进来了。
+       */
+      const muted = failed && this.isMuteError(res)
+      if (muted) this.markMuted(e)
+      else if (failed) util.makeLog('error', ['发送消息错误', msg, res?.error?.[0] ?? res], e.self_id)
 
       /** 日志用带色目标，最近消息记录用无色的 targetPlain */
       const targetPlain =
@@ -1224,10 +1240,9 @@ class PluginsLoader {
       const content = util.describeMsg(msg)
       const byPlugin = e.logPlugin ? ` · 由 ${logger.green.bold(e.logPlugin)}` : ''
       const cost = Date.now() - sendStart
-      const failed = hasSendError(res)
       const failReason = failed ? util.truncate(describeSendError(res), 120) : ''
       util.makeLog(
-        failed ? 'error' : 'info',
+        failed ? (muted ? 'debug' : 'error') : 'info',
         `发 ${failed ? '✖' : '▶'} ${target} · ${logger.yellow(content)}${byPlugin} · ${util.colorCost(cost)}${
           failed ? ` · 发送失败：${failReason}` : ''
         }`,
@@ -1357,9 +1372,72 @@ class PluginsLoader {
 
   /* ==================== 过滤/冷却 ==================== */
 
+  /**
+   * 发送失败是不是"这个群发不出去"（被禁言）
+   *
+   * 各协议端的形态不一样：icqq 抛 ApiRejection（code 120 / "在该群被禁言"），
+   * OneBot 那几个返回 `{ retcode, wording }`，所以错误码和文案一起认。
+   */
+  private isMuteError(res: any): boolean {
+    const err = res?.error ?? res?.err
+    const first = Array.isArray(err) ? err[0] : err
+    if (!first) return false
+    if (Number(first.code ?? first.retcode ?? first.err_code) === 120) return true
+    const text = `${first.message ?? first.msg ?? first.wording ?? first}`
+    return /禁言|muted|shut ?up/i.test(text)
+  }
+
+  /**
+   * 记下"这个群暂时发不出去"，窗口内不再尝试
+   *
+   * 状态只存在内存里，且只能靠实际发送失败反推：
+   * - 禁言 / 解禁都是 notice，重启、停机、崩溃期间发生的那一段根本收不到，靠通知维护状态必然漏；
+   * - 协议端的群资料同样有缓存（icqq 是 900 秒），禁言刚开始时读到的 mute_left 仍是 0。
+   * 所以重启后缓存清空、首条消息照常试一次，失败再重新记窗口。
+   *
+   * 窗口取 60 秒是为了给恢复延迟一个上界：解禁通知可能也错过了，
+   * 到期自动放行，最坏情况就是解禁后多安静一分钟。
+   */
+  private markMuted(e: JiuLiEvent, seconds = 60) {
+    if (!e.group_id) return
+    const key = `${e.self_id}:${e.group_id}`
+    const first = !this.isMuted(e)
+    this.muted.set(key, Date.now() + seconds * 1000)
+    if (first)
+      util.makeLog(
+        'warn',
+        `群 ${e.group_id} 发不出消息（被禁言），${seconds} 秒内跳过该群的消息（不缓存、不补发）；` +
+          '之后按新进来的消息重新尝试',
+        'Msg',
+      )
+  }
+
+  /**
+   * 该群是否还在禁言窗口内（过期即清掉）
+   *
+   * 只认时间、不认"解禁通知"：那类 notice 在进程不在时会丢，收到了也不代表没漏过。
+   */
+  private isMuted(e: JiuLiEvent): boolean {
+    if (!e.group_id) return false
+    const key = `${e.self_id}:${e.group_id}`
+    const until = this.muted.get(key)
+    if (!until) return false
+    if (until > Date.now()) return true
+    this.muted.delete(key)
+    return false
+  }
+
   checkLimit(e: JiuLiEvent, config?: any) {
     if (e.group && (e.group.mute_left > 0 || (e.group.all_muted && !e.group.is_admin && !e.group.is_owner)))
       return false
+    /**
+     * 上面那条依赖协议端给的群资料（mute_left / all_muted），资料没加载时读出来是 NaN/0，
+     * 判断会静默放行 —— 用发送失败反推出来的禁言窗口兜底。
+     */
+    if (this.isMuted(e)) {
+      util.makeLog('debug', `群 ${e.group_id} 在禁言窗口内，跳过本次分发 · ${e.user_id}`, 'Msg')
+      return false
+    }
     if (!e.message || e.isPrivate) return true
 
     config ||= cfg.getGroup(e.self_id, e.group_id)
