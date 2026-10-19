@@ -30,6 +30,8 @@ declare class PluginsLoader {
     singleCD: Record<string, boolean>;
     /** 消息去重（1s） */
     msgThrottle: Record<string, boolean>;
+    /** 禁言窗口：`self_id:group_id` → 截止时间戳（发送失败反推出来的） */
+    private muted;
     watcher: Record<string, any>;
     /**
      * 重载风暴熔断：只统计**机器自激**的重载时刻表（人工改文件不计，见 noteReload）。
@@ -204,6 +206,31 @@ declare class PluginsLoader {
     collectTask(task: any, name: string, key: string): void;
     startTask(name: string, i: any): Promise<void>;
     createTask(): void;
+    /**
+     * 发送失败是不是"这个群发不出去"（被禁言）
+     *
+     * 各协议端的形态不一样：icqq 抛 ApiRejection（code 120 / "在该群被禁言"），
+     * OneBot 那几个返回 `{ retcode, wording }`，所以错误码和文案一起认。
+     */
+    private isMuteError;
+    /**
+     * 记下"这个群暂时发不出去"，窗口内不再尝试
+     *
+     * 状态只存在内存里，且只能靠实际发送失败反推：
+     * - 禁言 / 解禁都是 notice，重启、停机、崩溃期间发生的那一段根本收不到，靠通知维护状态必然漏；
+     * - 协议端的群资料同样有缓存（icqq 是 900 秒），禁言刚开始时读到的 mute_left 仍是 0。
+     * 所以重启后缓存清空、首条消息照常试一次，失败再重新记窗口。
+     *
+     * 窗口取 60 秒是为了给恢复延迟一个上界：解禁通知可能也错过了，
+     * 到期自动放行，最坏情况就是解禁后多安静一分钟。
+     */
+    private markMuted;
+    /**
+     * 该群是否还在禁言窗口内（过期即清掉）
+     *
+     * 只认时间、不认"解禁通知"：那类 notice 在进程不在时会丢，收到了也不代表没漏过。
+     */
+    private isMuted;
     checkLimit(e: JiuLiEvent, config?: any): boolean;
     setLimit(e: JiuLiEvent, config?: any): void;
     onlyReplyAt(e: JiuLiEvent, groupCfg?: any): boolean;
