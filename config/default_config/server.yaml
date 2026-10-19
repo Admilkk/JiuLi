@@ -5,8 +5,20 @@ port: 1721
 # 服务器缺省跳转地址
 redirect: https://gitee.com/fox-glaze/jiuli
 # 服务器鉴权
+# 支持任意键值：同名请求头、Authorization: Bearer <token>、query 参数都能带
+# 例：auth: { access_token: 一串随机字符 }
+# 未配置时只有本机直连免鉴权，公网请求只放行下面的 public 路径
 auth:
-# Authorization: Bearer <access_token>
+# 未配置 auth 时，公网可直接访问的路径前缀（面板自带登录，/File 是要发给 QQ 取图的一次性地址）
+# 换用其他面板插件时，把它挂载的路径前缀也加进来
+public:
+  - /hl-icqq-web
+  - /hl-icqq-web-ws
+  - /chatai
+  - /douyin
+  - /File
+# 放行全部路径给公网（等于关掉鉴权，仅用于确实不需要保护的场景）
+allow_remote: false
 https:
 # url: https://localhost:722
 # port: 722

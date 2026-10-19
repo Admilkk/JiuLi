@@ -21,6 +21,9 @@ import type { JiuLiEvent, PluginEntry } from './types.js'
 /** 兼容旧插件直接使用全局 plugin */
 ;(globalThis as any).plugin = plugin
 
+/** stdin 适配器打的内部事件标记，Symbol 不参与 JSON 序列化，网络侧伪造不出来 */
+const STDIN_EVENT = Symbol.for('jiuli.internal.stdin')
+
 /** 简易 truncate，避免核心依赖 lodash */
 function truncate(str: string, length: number) {
   if (!str) return ''
@@ -1149,7 +1152,15 @@ class PluginsLoader {
 
     e.logText = `${logger.cyan(e.logText)}${logger.red(`[${truncate(String(e.msg || e.raw_message || util.String(e)), 100)}]`)}`
 
-    if (e.user_id && cfg.master[e.self_id]?.includes(String(e.user_id))) e.isMaster = true
+    /**
+     * 主人判定只信「事件自报的身份」，所以 stdin 这个默认主人必须额外验来源：
+     * 任何能发 OneBot WS 帧的人都能把 self_id / user_id 写成 stdin，标记只有本地输入适配器能带。
+     */
+    if (e.user_id && cfg.master[e.self_id]?.includes(String(e.user_id))) {
+      if (e.self_id === 'stdin' && (e as any)[STDIN_EVENT] !== true)
+        util.makeLog('warn', ['拒绝伪造的 stdin 事件', { user_id: e.user_id }], 'Loader')
+      else e.isMaster = true
+    }
 
     /** 群聊未 at 机器人时，剥掉消息开头的 bot 别名并标记 hasAlias */
     if (e.msg && e.isGroup && !e.atBot) {
