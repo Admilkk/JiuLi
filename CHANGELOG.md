@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.0.0](https://github.com/HL-z7/JiuLi/compare/jiuli-v3.4.3...jiuli-v4.0.0) (2026-10-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* 公网免鉴权接入（远程 OneBot 反连、Milky webhook 等）需要配置 server.auth，或显式设置 allow_remote: true
+
+### 🐛 Bug 修复
+
+* 核心 HTTP 默认拒绝公网未鉴权请求 ([d3941e4](https://github.com/HL-z7/JiuLi/commit/d3941e4c6b300c0e87020187386c3c6adda3f23f))
+
 ## [3.4.3](https://github.com/HL-z7/JiuLi/compare/jiuli-v3.4.2...jiuli-v3.4.3) (2026-10-19)
 
 
