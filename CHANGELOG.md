@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.1.0](https://github.com/HL-z7/JiuLi/compare/jiuli-v4.0.2...jiuli-v4.1.0) (2026-10-20)
+
+
+### ✨ 新功能
+
+* 新增 #插件速度 查看插件加载耗时 ([e62c72c](https://github.com/HL-z7/JiuLi/commit/e62c72cd0776a2b6c6cec59cb7f168597e9e8283))
+
+
+### 🐛 Bug 修复
+
+* #状态 修正 Windows 11 的版本显示 ([adb4e7c](https://github.com/HL-z7/JiuLi/commit/adb4e7c69923f821f1f9af06a9e9e2a5628a366c))
+
 ## [4.0.2](https://github.com/HL-z7/JiuLi/compare/jiuli-v4.0.1...jiuli-v4.0.2) (2026-10-20)
 
 
