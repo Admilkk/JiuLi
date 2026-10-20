@@ -203,7 +203,13 @@ export default class JiuLiBot extends EventEmitter {
         if (key && after > before) {
           let set = this.pluginLayers.get(key)
           if (!set) this.pluginLayers.set(key, (set = new Set()))
-          for (const layer of router.stack.slice(before, after)) set.add(layer)
+          /**
+           * 兜底层不能记到插件名下：ensureFallbackLast() 会挪动栈，而 app.get 内部还会走一次
+           * app.route（同样被包装），嵌套调用会让外层的 before/after 窗口把兜底层算进新增层，
+           * 重载时被当成插件路由删掉，之后所有未匹配请求直接 404。
+           */
+          for (const layer of router.stack.slice(before, after))
+            if (!this.fallbackLayers.includes(layer)) set.add(layer)
           /**
            * 热重载会重新 app.use()，新路由是 append 到 stack 末尾的，而兜底重定向 / 错误处理
            * 是启动完成时才注册的。不挪回去的话请求会先命中兜底 → 全部 302 空 Location
@@ -273,17 +279,18 @@ export default class JiuLiBot extends EventEmitter {
    * 文件（不重启）面板就变 302 空白页，根因就在这里。
    */
   private ensureFallbackLast() {
-    if (!this.fallbackLayers.length) return
+    const n = this.fallbackLayers.length
+    if (!n) return
     const router = this.express?.router || this.express?._router
     const stack = router?.stack
     if (!stack) return
-    const set = new Set(this.fallbackLayers)
-    const firstIndex = stack.findIndex((layer: any) => set.has(layer))
-    if (firstIndex === -1) return
-    /** 兜底之后还有别的层才需要挪，避免每次注册都白动一遍 */
-    if (!stack.slice(firstIndex).some((layer: any) => !set.has(layer))) return
-    for (let i = stack.length - 1; i >= 0; i--) if (set.has(stack[i])) stack.splice(i, 1)
-    stack.push(...this.fallbackLayers)
+    /** 兜底层已经原样排在末尾就不用动 */
+    if (this.fallbackLayers.every((layer, i) => stack[stack.length - n + i] === layer)) return
+    /** 只剩部分兜底层说明栈被别处动过，贸然重排会把别的层挤掉，交给下次注册再修 */
+    if (!this.fallbackLayers.every(layer => stack.includes(layer))) return
+    const rest = stack.filter((layer: any) => !this.fallbackLayers.includes(layer))
+    stack.length = 0
+    stack.push(...rest, ...this.fallbackLayers)
   }
 
   /** 插件卸载/重载前清理它注册的路由与 WS 路径 */
