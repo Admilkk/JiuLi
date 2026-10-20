@@ -18,6 +18,32 @@ function getRealVersion() {
 
 const mb = n => `${(n / 1024 / 1024).toFixed(1)}MB`
 
+/** 耗时：1 秒以内给毫秒，超过给秒（保留两位） */
+const ms = n => (n >= 1000 ? `${(n / 1000).toFixed(2)}s` : `${Math.round(n)}ms`)
+
+/**
+ * 系统名
+ *
+ * `os.release()` 在 Windows 上永远返回 `10.0.<build>`，Win11 从 build 22000 起，
+ * 直接拼 os.type() 会把 Win11 显示成 "Windows_NT 10.0.26200"。
+ */
+function osName() {
+  const release = os.release()
+  if (process.platform === 'win32') {
+    const build = Number(release.split('.')[2])
+    const name = build >= 22000 ? 'Windows 11' : build >= 10240 ? 'Windows 10' : 'Windows'
+    return build ? `${name} (build ${build})` : `${name} ${release}`
+  }
+  if (process.platform === 'darwin') return `macOS ${release}`
+  if (process.platform === 'linux') {
+    try {
+      const pretty = /^PRETTY_NAME="?([^"]+)"?$/m.exec(fs.readFileSync('/etc/os-release', 'utf8'))?.[1]
+      if (pretty) return `${pretty} (${release})`
+    } catch {}
+  }
+  return `${os.type()} ${release}`
+}
+
 /**
  * #状态 / #统计
  *
@@ -28,9 +54,12 @@ export default class Status extends JiuLiPlugin {
   constructor() {
     super({
       name: '状态统计',
-      dsc: '#状态',
+      dsc: '#状态 #插件速度',
       event: 'message',
-      rule: [{ reg: '^#(状态|统计)', fnc: 'status' }],
+      rule: [
+        { reg: '^#(状态|统计)', fnc: 'status' },
+        { reg: '^#插件(加载|速度|耗时)', fnc: 'pluginSpeed', permission: 'master' },
+      ],
     })
   }
 
@@ -64,13 +93,32 @@ export default class Status extends JiuLiPlugin {
       `${name} v${getRealVersion()}`,
       `运行时间：${Bot.getTimeDiff()}`,
       `内存使用：${mb(process.memoryUsage().rss)} / 系统 ${mb(os.totalmem())}`,
-      `系统版本：${os.type()} ${os.release()} · ${process.platform} ${process.arch}`,
+      `系统版本：${osName()} · ${process.platform} ${process.arch}`,
       `运行环境：Node ${process.version} · ${Bot.uin.length} 个账号在线`,
       `插件：${PluginsLoader.pluginCount} 个 · 规则 ${rules} 条 · 渲染${renderService.renderers.size ? '就绪' : '不可用'}`,
       `用户量：${users} · 群量：${groups}`,
       `消息 今日：收 ${recv} · 发 ${send}`,
       `消息 总计：收 ${recvAll} · 发 ${sendAll}`,
     ].join('\n')
+  }
+
+  /** 各插件从开始加载到就绪的耗时（并行导入，含公共依赖解析，仅作参考） */
+  async pluginSpeed() {
+    const entries = Object.entries(PluginsLoader.load_time ?? {}).sort((a, b) => b[1] - a[1])
+    if (!entries.length) return this.reply('还没有加载耗时数据，重载后再看', true)
+    const limit = Math.min(Math.max(Number(String(this.e.msg).replace(/^#插件(加载|速度|耗时)/, '').trim()) || 30, 1), 200)
+    const top = entries.slice(0, limit)
+    const total = entries.reduce((n, [, t]) => n + t, 0)
+    return this.reply(
+      [
+        `插件文件加载耗时：共 ${entries.length} 个，合计 ${ms(total)}，最慢 ${top.length} 个`,
+        ...top.map(([file, t], i) => `${String(i + 1).padStart(3)}. ${ms(t).padStart(8)}  ${file}`),
+        entries.length > top.length ? `……其余 ${entries.length - top.length} 个略（#插件速度 200 可看更多）` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      true,
+    )
   }
 
   parseArgs(arg) {
