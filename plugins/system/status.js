@@ -102,22 +102,22 @@ export default class Status extends JiuLiPlugin {
     ].join('\n')
   }
 
-  /** 各插件从开始加载到就绪的耗时（并行导入，含公共依赖解析，仅作参考） */
+  /**
+   * 各插件从开始加载到就绪的耗时（并行导入，含公共依赖解析，仅作参考）
+   *
+   * 合并转发一次发全，不截断：几百个插件也只是多几个转发节点，不受单条消息长度限制。
+   */
   async pluginSpeed() {
     const entries = Object.entries(PluginsLoader.load_time ?? {}).sort((a, b) => b[1] - a[1])
     if (!entries.length) return this.reply('还没有加载耗时数据，重载后再看', true)
-    const limit = Math.min(Math.max(Number(String(this.e.msg).replace(/^#插件(加载|速度|耗时)/, '').trim()) || 30, 1), 200)
-    const top = entries.slice(0, limit)
     const total = entries.reduce((n, [, t]) => n + t, 0)
+    const lines = [
+      `插件文件加载耗时：共 ${entries.length} 个，合计 ${ms(total)}`,
+      '按就绪耗时倒序；并行导入，数值含公共依赖解析，只作参考',
+      ...entries.map(([file, t], i) => `${String(i + 1).padStart(3)}. ${ms(t).padStart(8)}  ${file}`),
+    ]
     return this.reply(
-      [
-        `插件文件加载耗时：共 ${entries.length} 个，合计 ${ms(total)}，最慢 ${top.length} 个`,
-        ...top.map(([file, t], i) => `${String(i + 1).padStart(3)}. ${ms(t).padStart(8)}  ${file}`),
-        entries.length > top.length ? `……其余 ${entries.length - top.length} 个略（#插件速度 200 可看更多）` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      true,
+      Bot.makeForwardArray(lines, { user_id: Bot.uin[0] ?? '10000', nickname: '插件加载耗时' }),
     )
   }
 
