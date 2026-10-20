@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.2](https://github.com/HL-z7/JiuLi/compare/jiuli-v4.0.1...jiuli-v4.0.2) (2026-10-20)
+
+
+### 🐛 Bug 修复
+
+* 插件上下文方法缺失时不再打断消息分发 ([2a61bda](https://github.com/HL-z7/JiuLi/commit/2a61bda1c777fdfba5ddec1cb8ca412ef6e838a7))
+
 ## [4.0.1](https://github.com/HL-z7/JiuLi/compare/jiuli-v4.0.0...jiuli-v4.0.1) (2026-10-20)
 
 
