@@ -18,6 +18,9 @@ function getRealVersion() {
 
 const mb = n => `${(n / 1024 / 1024).toFixed(1)}MB`
 
+/** 耗时：1 秒以内给毫秒，超过给秒（保留两位） */
+const ms = n => (n >= 1000 ? `${(n / 1000).toFixed(2)}s` : `${Math.round(n)}ms`)
+
 /**
  * 系统名
  *
@@ -51,9 +54,12 @@ export default class Status extends JiuLiPlugin {
   constructor() {
     super({
       name: '状态统计',
-      dsc: '#状态',
+      dsc: '#状态 #插件速度',
       event: 'message',
-      rule: [{ reg: '^#(状态|统计)', fnc: 'status' }],
+      rule: [
+        { reg: '^#(状态|统计)', fnc: 'status' },
+        { reg: '^#插件(加载|速度|耗时)', fnc: 'pluginSpeed', permission: 'master' },
+      ],
     })
   }
 
@@ -94,6 +100,25 @@ export default class Status extends JiuLiPlugin {
       `消息 今日：收 ${recv} · 发 ${send}`,
       `消息 总计：收 ${recvAll} · 发 ${sendAll}`,
     ].join('\n')
+  }
+
+  /** 各插件从开始加载到就绪的耗时（并行导入，含公共依赖解析，仅作参考） */
+  async pluginSpeed() {
+    const entries = Object.entries(PluginsLoader.load_time ?? {}).sort((a, b) => b[1] - a[1])
+    if (!entries.length) return this.reply('还没有加载耗时数据，重载后再看', true)
+    const limit = Math.min(Math.max(Number(String(this.e.msg).replace(/^#插件(加载|速度|耗时)/, '').trim()) || 30, 1), 200)
+    const top = entries.slice(0, limit)
+    const total = entries.reduce((n, [, t]) => n + t, 0)
+    return this.reply(
+      [
+        `插件文件加载耗时：共 ${entries.length} 个，合计 ${ms(total)}，最慢 ${top.length} 个`,
+        ...top.map(([file, t], i) => `${String(i + 1).padStart(3)}. ${ms(t).padStart(8)}  ${file}`),
+        entries.length > top.length ? `……其余 ${entries.length - top.length} 个略（#插件速度 200 可看更多）` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      true,
+    )
   }
 
   parseArgs(arg) {
