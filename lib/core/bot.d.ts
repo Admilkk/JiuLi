@@ -25,6 +25,8 @@ export default class JiuLiBot extends EventEmitter {
     private pluginWs;
     /** 插件在加载期挂的事件监听：key → [{ event, listener }] */
     private pluginListeners;
+    /** run() 末尾注册的兜底重定向 / 错误处理层；插件热重载追加路由后要把它们挪回末尾 */
+    private fallbackLayers;
     /**
      * 当前正在加载的插件 key（由 loader 在 import 前后设置）。
      * 读的是 AsyncLocalStorage 里的上下文，不是全局变量 —— 插件并行导入时全局量会被
@@ -45,6 +47,14 @@ export default class JiuLiBot extends EventEmitter {
      * 不参与清理，免得把用户运行时才建的东西删掉。
      */
     private wrapEventMethods;
+    /**
+     * 把兜底重定向 / 错误处理层挪到 express 栈末尾。
+     *
+     * express 先注册先匹配，兜底必须在最后。启动时它们确实最后注册，但热重载的插件会重新
+     * app.use()，新 layer 追加到末尾就把兜底顶到了前面 —— 正常启动后一直好好的，一改插件
+     * 文件（不重启）面板就变 302 空白页，根因就在这里。
+     */
+    private ensureFallbackLast;
     /** 插件卸载/重载前清理它注册的路由与 WS 路径 */
     cleanupPluginResources(key: string): {
         routes: number;
