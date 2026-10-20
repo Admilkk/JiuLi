@@ -19,6 +19,29 @@ function getRealVersion() {
 const mb = n => `${(n / 1024 / 1024).toFixed(1)}MB`
 
 /**
+ * 系统名
+ *
+ * `os.release()` 在 Windows 上永远返回 `10.0.<build>`，Win11 从 build 22000 起，
+ * 直接拼 os.type() 会把 Win11 显示成 "Windows_NT 10.0.26200"。
+ */
+function osName() {
+  const release = os.release()
+  if (process.platform === 'win32') {
+    const build = Number(release.split('.')[2])
+    const name = build >= 22000 ? 'Windows 11' : build >= 10240 ? 'Windows 10' : 'Windows'
+    return build ? `${name} (build ${build})` : `${name} ${release}`
+  }
+  if (process.platform === 'darwin') return `macOS ${release}`
+  if (process.platform === 'linux') {
+    try {
+      const pretty = /^PRETTY_NAME="?([^"]+)"?$/m.exec(fs.readFileSync('/etc/os-release', 'utf8'))?.[1]
+      if (pretty) return `${pretty} (${release})`
+    } catch {}
+  }
+  return `${os.type()} ${release}`
+}
+
+/**
  * #状态 / #统计
  *
  * 默认给主人一屏概要；带参数时查明细：
@@ -64,7 +87,7 @@ export default class Status extends JiuLiPlugin {
       `${name} v${getRealVersion()}`,
       `运行时间：${Bot.getTimeDiff()}`,
       `内存使用：${mb(process.memoryUsage().rss)} / 系统 ${mb(os.totalmem())}`,
-      `系统版本：${os.type()} ${os.release()} · ${process.platform} ${process.arch}`,
+      `系统版本：${osName()} · ${process.platform} ${process.arch}`,
       `运行环境：Node ${process.version} · ${Bot.uin.length} 个账号在线`,
       `插件：${PluginsLoader.pluginCount} 个 · 规则 ${rules} 条 · 渲染${renderService.renderers.size ? '就绪' : '不可用'}`,
       `用户量：${users} · 群量：${groups}`,
