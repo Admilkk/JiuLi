@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.1](https://github.com/HL-z7/JiuLi/compare/jiuli-v4.1.0...jiuli-v4.1.1) (2026-10-20)
+
+
+### 🐛 Bug 修复
+
+* #插件速度 改用合并转发并列出全部插件 ([84d3760](https://github.com/HL-z7/JiuLi/commit/84d3760f331235c5e459c5e09a61e493a1c79ec1))
+
 ## [4.1.0](https://github.com/HL-z7/JiuLi/compare/jiuli-v4.0.2...jiuli-v4.1.0) (2026-10-20)
 
 
