@@ -15,6 +15,8 @@ import cfg from './config/index.js'
 import util from './util.js'
 import { logger } from './log.js'
 import { currentLoadingKey } from './loading.js'
+import { isLoopbackAddress, redactLog, redactUrl } from './http-security.js'
+import { controlHeader, saveControlToken } from './server-control.js'
 import type { JiuLiEvent } from './types.js'
 
 export default class JiuLiBot extends EventEmitter {
@@ -346,16 +348,17 @@ export default class JiuLiBot extends EventEmitter {
 
   /** 鉴权失败计数（仅公网来源），用于阻断暴力尝试 */
   private authFails = new Map<string, { count: number; time: number }>()
+  private controlToken = crypto.randomBytes(32).toString('hex')
 
   /** 回环地址（含 IPv4 映射形态） */
   isLoopback(addr: any) {
-    return /^(::1|::ffff:127\.|127\.)/i.test(String(addr || ''))
+    return isLoopbackAddress(addr)
   }
 
   /**
    * 是否本机直连。
-   * 反向代理会把公网请求变成 127.0.0.1，所以带转发头的回环请求按外部处理，
-   * 否则在 nginx 后面挂一层就等于没鉴权。转发头被伪造只会让自己被拒，不会放行。
+   * 带转发头的回环请求按外部处理；未传递转发头的反代无法从连接 IP 区分，
+   * 因此公开反代仍应配置 server.auth。伪造转发头只会使请求被拒，不会放行。
    */
   private isLocalRequest(req: any) {
     if (!this.isLoopback(req.socket?.remoteAddress)) return false
@@ -425,14 +428,17 @@ export default class JiuLiBot extends EventEmitter {
     /** upgrade 请求没走过 serverAuth 的 rid/sid 赋值，这里补齐再写日志 */
     const socket = req.socket || {}
     req.rid ??= `${req.socket?.remoteAddress || ''}:${socket.remotePort}${req.headers?.['sec-websocket-key'] ? `-${req.headers['sec-websocket-key']}` : ''}`
-    req.sid ??= `${req.method || 'UPGRADE'} ${req.url || req.originalUrl || ''}`
+    req.sid ??= `${req.method || 'UPGRADE'} ${redactUrl(req.url || req.originalUrl, cfg.server.auth)}`
     const local = this.isLocalRequest(req)
     const fails = local ? 0 : this.hitAuthFail(String(req.socket?.remoteAddress || req.ip || ''))
     if (req.res?.sendStatus) req.res.sendStatus(fails > 20 ? 429 : 401)
-    /** 前几次留完整现场，之后降到 debug：公网扫描量大会把日志刷爆 */
+    /** 前几次留脱敏后的现场，之后降到 debug：公网扫描量大会把日志刷爆 */
     util.makeLog(
       fails <= 3 ? 'error' : 'debug',
-      ['HTTP', req.method, '请求', req.originalUrl, '拒绝', reason, { headers: req.headers }],
+      [
+        'HTTP', req.method, '请求', redactUrl(req.originalUrl, cfg.server.auth), '拒绝', reason,
+        redactLog({ headers: req.headers }, cfg.server.auth),
+      ],
       `${req.sid} <≠ ${req.rid}`,
       true,
     )
@@ -451,7 +457,7 @@ export default class JiuLiBot extends EventEmitter {
     if (this.stat.online !== 2) return this.once('online', this.serverAuth.bind(this, req))
 
     req.rid ??= `${req.ip}:${req.socket?.remotePort}`
-    req.sid ??= `${req.protocol}://${req.hostname}:${req.socket?.localPort}${req.originalUrl}`
+    req.sid ??= `${req.protocol}://${req.hostname}:${req.socket?.localPort}${redactUrl(req.originalUrl, cfg.server.auth)}`
     /** upgrade 请求没有 req.path / originalUrl，只能从 req.url 取 */
     const fullUrl = String(req.originalUrl || req.url || '/')
     const pathname = fullUrl.split('?')[0]
@@ -473,7 +479,12 @@ export default class JiuLiBot extends EventEmitter {
      */
     if (this.isLocalRequest(req)) return req.next?.()
     if (cfg.server.allow_remote === true) {
-      util.makeLog('warn', ['HTTP', req.method, '请求', req.originalUrl, '在 allow_remote 下免鉴权放行'], `${req.sid} <= ${req.rid}`, true)
+      util.makeLog(
+        'warn',
+        ['HTTP', req.method, '请求', redactUrl(req.originalUrl, cfg.server.auth), '在 allow_remote 下免鉴权放行'],
+        `${req.sid} <= ${req.rid}`,
+        true,
+      )
       return req.next?.()
     }
     return this.denyAuth(req, '未配置 server.auth，公网访问已拒绝')
@@ -481,15 +492,16 @@ export default class JiuLiBot extends EventEmitter {
 
   serverStatus(req: any) {
     const report: any = process.report.getReport()
-    /** 环境变量常带 token / 密钥，进程报告本身也不需要交给调用方 */
-    delete report.environmentVariables
-
+    const { nodejsVersion, arch, platform, wordSize } = report.header
+    /** 仅保留诊断指标，完整报告还包含命令行、绝对路径和网络信息。 */
     req.res.type('json')
     req.res.send(
-      JSON.stringify(report).replace(
-        /(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/g,
-        '[IPv4]',
-      ),
+      JSON.stringify({
+        header: { nodejsVersion, arch, platform, wordSize },
+        javascriptHeap: report.javascriptHeap,
+        resourceUsage: report.resourceUsage,
+        uvthreadResourceUsage: report.uvthreadResourceUsage,
+      }),
     )
   }
 
@@ -503,18 +515,25 @@ export default class JiuLiBot extends EventEmitter {
 
     const msg: any = { headers: req.headers }
     for (const i of ['query', 'body']) if (req[i] && Object.keys(req[i]).length) msg[i] = req[i]
-    util.makeLog(quiet ? 'debug' : 'mark', ['HTTP', req.method, '请求', msg], `${req.sid} <= ${req.rid}`, true)
+    util.makeLog(
+      quiet ? 'debug' : 'mark',
+      ['HTTP', req.method, '请求', redactLog(msg, cfg.server.auth)],
+      `${req.sid} <= ${req.rid}`,
+      true,
+    )
     req.next()
   }
 
   async serverExit(req: any) {
-    /**
-     * 只接受本机来源。这里刻意不含 `127.0.0.1`：auth 默认是空的，
-     * 若前面挂了一层 `proxy_pass http://127.0.0.1:<port>` 的反代，外部请求的 req.ip 就是 127.0.0.1，
-     * 加进来等于把「任何人都能远程让机器人退出」打开。要 IPv4 回环发停止请求请先配 server.auth。
-     */
-    if (!['::1', '::ffff:127.0.0.1'].includes(String(req.ip))) return
-    this.exit(1)
+    const token = req.headers?.[controlHeader]
+    if (
+      !this.isLoopback(req.socket?.remoteAddress) ||
+      typeof token !== 'string' ||
+      !this.safeEqual(token, this.controlToken)
+    )
+      return req.res?.sendStatus(403)
+    req.res?.sendStatus(202)
+    return this.exit(1)
   }
 
   wsConnect(req: any, socket: any, head: any): any {
@@ -531,15 +550,14 @@ export default class JiuLiBot extends EventEmitter {
       socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
       return socket.destroy()
     }
-    req.sid = `ws://${host}${req.url}`
+    req.sid = `ws://${host}${redactUrl(req.url, cfg.server.auth)}`
     req.query = Object.fromEntries(wsUrl.searchParams.entries())
     if (this.serverAuth(req) === false) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
       return socket.destroy()
     }
 
-    const msg: any = { headers: req.headers }
-    if (Object.keys(req.query).length) msg.query = req.query
+    const msg = redactLog({ headers: req.headers, query: req.query }, cfg.server.auth)
 
     /** 用 pathname 选处理器：带 query 或多余斜杠时 req.url 切分不可靠 */
     const path = wsUrl.pathname.split('/').filter(Boolean)[0]
@@ -556,10 +574,12 @@ export default class JiuLiBot extends EventEmitter {
         util.makeLog('mark', '断开连接', `${req.sid} <≠> ${req.rid}`, true)
         this.cleanupBotConnection(conn)
       })
-      conn.on('message', (m: any) => util.makeLog('debug', ['消息', util.String(m)], `${req.sid} <= ${req.rid}`, true))
+      conn.on('message', (m: any) =>
+        util.makeLog('debug', ['消息', redactLog(m, cfg.server.auth)], `${req.sid} <= ${req.rid}`, true),
+      )
       ;(conn as any).sendMsg = (m: any) => {
         if (!Buffer.isBuffer(m)) m = util.String(m)
-        util.makeLog('debug', ['消息', m], `${req.sid} => ${req.rid}`, true)
+        util.makeLog('debug', ['消息', redactLog(m, cfg.server.auth)], `${req.sid} => ${req.rid}`, true)
         return conn.send(m)
       }
       for (const i of this.wsf[path]) i(conn, req, socket, head)
@@ -603,6 +623,13 @@ export default class JiuLiBot extends EventEmitter {
       return
     }
     const { address, port } = (this as any)[server].address()
+    if (!https) {
+      try {
+        await saveControlToken(port, this.controlToken)
+      } catch (err) {
+        util.makeLog('error', ['保存本机控制凭据失败，停止命令不可用', err], 'Server')
+      }
+    }
     util.makeLog('mark', [`启动 HTTP${https ? 'S' : ''} 服务器`, logger.green(`http${https ? 's' : ''}://[${address}]:${port}`)], 'Server')
     this.url = (https && cfg.server.https.url) || cfg.server.url
     for (const name of [404, 'timeout'])
@@ -688,11 +715,15 @@ export default class JiuLiBot extends EventEmitter {
     file.name = file.name ? encodeURIComponent(file.name) : ulid()
 
     if (typeof times === 'number') file.times = times
-    /** 只编码一次：URL 与 this.fs 的 key 都存这一份，客户端按 URL 原样请求即命中 */
-    this.fs[file.name] = file
-    this.setFileTimeout(file.name, file, time)
+    /** 文件名只作展示，公开下载凭据使用随机 ID，不能靠猜名字读取或覆盖文件。 */
+    const key =
+      time === false && times === false && (name === 404 || name === 'timeout')
+        ? String(name)
+        : crypto.randomBytes(16).toString('hex')
+    this.fs[key] = file
+    this.setFileTimeout(key, file, time)
 
-    const url = new URL(`File/${file.name}`, this.url)
+    const url = new URL(`File/${key}`, this.url)
     /**
      * /File 默认在 server.public 里，地址不需要带 token。
      * 只有用户把 /File 从 public 移除时才补参数，避免把 access_token 随图片 URL 发给协议端。
@@ -752,6 +783,7 @@ export default class JiuLiBot extends EventEmitter {
     }
 
     if (file?.type?.mime) req.res.setHeader('Content-Type', file.type.mime)
+    req.res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'")
     util.makeLog(
       'mark',
       `发送文件：${file?.name}(${file?.url} ${(file?.buffer?.length / 1024).toFixed(2)}KB)`,

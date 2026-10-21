@@ -2,6 +2,7 @@ import cfg from "../../lib/config/config.js"
 import util from "../../lib/util.js"
 import fetch from "node-fetch"
 import { WebSocket } from "ws"
+import { redactUrl } from "../../lib/core/http-security.js"
 import fs from "node:fs"
 import YAML from "yaml"
 
@@ -57,7 +58,7 @@ Bot.adapter.push(
         let heartbeat = null
 
         ws.on("open", () => {
-          Bot.makeLog("debug", `WebSocket 已连接: ${wsUrl}`, "Milky")
+          Bot.makeLog("debug", `WebSocket 已连接: ${redactUrl(wsUrl)}`, "Milky")
           this.onConnect(ws, apiBaseUrl)
 
           heartbeat = setInterval(() => {

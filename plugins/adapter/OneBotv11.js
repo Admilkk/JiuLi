@@ -1,6 +1,12 @@
 import cfg from "../../lib/config/config.js"
 import path from "node:path"
 import { ulid } from "ulid"
+import {
+  canBindAccount,
+  isAccountConnection,
+  parseProtocolEvent,
+  receiveProtocol,
+} from "../../lib/core/protocol-security.js"
 
 Bot.adapter.push(
   new (class OneBotv11Adapter {
@@ -18,7 +24,7 @@ Bot.adapter.push(
       const echo = ulid()
       const request = { action, params, echo }
       ws.sendMsg(request)
-      const cache = Promise.withResolvers()
+      const cache = { ...Promise.withResolvers(), ws }
       this.echo.set(echo, cache)
       const timeout = setTimeout(() => {
         cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
@@ -962,6 +968,10 @@ Bot.adapter.push(
     }
 
     async connect(data, ws) {
+      if (!canBindAccount(Bot, this, data.self_id, ws)) {
+        Bot.makeLog("warn", "拒绝其他连接替换已上线的账号", data.self_id)
+        return false
+      }
       Bot[data.self_id] = {
         adapter: this,
         ws: ws,
@@ -1499,8 +1509,7 @@ Bot.adapter.push(
           this.heartbeat(data)
           break
         case "lifecycle":
-          this.connect(data, ws)
-          break
+          return this.connect(data, ws)
         default:
           Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
       }
@@ -1508,16 +1517,17 @@ Bot.adapter.push(
 
     message(data, ws) {
       try {
-        data = {
-          ...JSON.parse(data),
-          raw: Bot.String(data),
-        }
+        const raw = Bot.String(data)
+        data = parseProtocolEvent(data)
+        if (!data) return false
+        data.raw = raw
       } catch (err) {
         return Bot.makeLog("error", ["解码数据失败", data, err])
       }
 
       if (data.post_type) {
-        if (data.meta_event_type !== "lifecycle" && !Bot.uin.includes(data.self_id)) {
+        const lifecycle = data.post_type === "meta_event" && data.meta_event_type === "lifecycle"
+        if (!lifecycle && !isAccountConnection(Bot, this, data.self_id, ws)) {
           Bot.makeLog("warn", `找不到对应Bot，忽略消息：${logger.magenta(data.raw)}`, data.self_id)
           return false
         }
@@ -1538,7 +1548,7 @@ Bot.adapter.push(
         }
       } else if (data.echo) {
         const cache = this.echo.get(data.echo)
-        if (cache) return cache.resolve(data)
+        if (cache?.ws === ws) return cache.resolve(data)
       }
       Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
     }
@@ -1546,7 +1556,7 @@ Bot.adapter.push(
     load() {
       if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
       Bot.wsf[this.path].push((ws, ...args) =>
-        ws.on("message", data => this.message(data, ws, ...args)),
+        ws.on("message", data => receiveProtocol(Bot, this, data, ws, ...args)),
       )
     }
   })(),

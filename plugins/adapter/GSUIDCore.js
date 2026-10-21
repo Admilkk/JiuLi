@@ -1,3 +1,5 @@
+import { canBindAccount, receiveProtocol } from "../../lib/core/protocol-security.js"
+
 Bot.adapter.push(
   new (class GSUIDCoreAdapter {
     id = "GSUIDCore"
@@ -244,6 +246,7 @@ Bot.adapter.push(
         raw_message: "",
       }
 
+      if (!canBindAccount(Bot, this, data.self_id, ws)) return false
       if (Bot[data.self_id]) {
         data.bot = Bot[data.self_id]
         data.bot.ws = ws
@@ -326,7 +329,7 @@ Bot.adapter.push(
     load() {
       if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
       Bot.wsf[this.path].push((ws, ...args) =>
-        ws.on("message", data => this.message(data, ws, ...args)),
+        ws.on("message", data => receiveProtocol(Bot, this, data, ws, ...args)),
       )
     }
   })(),

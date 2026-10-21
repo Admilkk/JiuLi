@@ -1180,10 +1180,8 @@ class PluginsLoader {
 
     e.logText = `${logger.cyan(e.logText)}${logger.red(`[${truncate(String(e.msg || e.raw_message || util.String(e)), 100)}]`)}`
 
-    /**
-     * 主人判定只信「事件自报的身份」，所以 stdin 这个默认主人必须额外验来源：
-     * 任何能发 OneBot WS 帧的人都能把 self_id / user_id 写成 stdin，标记只有本地输入适配器能带。
-     */
+    /** 每次都按本地配置重算权限，不能保留协议事件自带的 isMaster。 */
+    e.isMaster = false
     if (e.user_id && cfg.master[e.self_id]?.includes(String(e.user_id))) {
       if (e.self_id === 'stdin' && (e as any)[STDIN_EVENT] !== true)
         util.makeLog('warn', ['拒绝伪造的 stdin 事件', { user_id: e.user_id }], 'Loader')

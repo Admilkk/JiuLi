@@ -1,3 +1,5 @@
+import { canBindAccount, receiveProtocol } from "../../lib/core/protocol-security.js"
+
 Bot.adapter.push(
   new (class OPQBotAdapter {
     id = "QQ"
@@ -17,7 +19,7 @@ Bot.adapter.push(
       const request = { BotUin: String(id), CgiCmd, CgiRequest, ReqId }
       const ws = Bot[id].ws
       ws.sendMsg(request)
-      const cache = Promise.withResolvers()
+      const cache = { ...Promise.withResolvers(), ws }
       this.echo.set(ReqId, cache)
       const timeout = setTimeout(() => {
         cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
@@ -373,13 +375,14 @@ Bot.adapter.push(
 
       const id = data.CurrentQQ
       if (id && data.CurrentPacket) {
+        if (!canBindAccount(Bot, this, id, ws)) return false
         if (Bot[id]) Bot[id].ws = ws
         else this.makeBot(id, ws)
 
         return this.makeEvent(id, data.CurrentPacket)
       } else if (data.ReqId) {
         const cache = this.echo.get(data.ReqId)
-        if (cache) return cache.resolve(data)
+        if (cache?.ws === ws) return cache.resolve(data)
       }
       Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, id)
     }
@@ -387,7 +390,7 @@ Bot.adapter.push(
     load() {
       if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
       Bot.wsf[this.path].push((ws, ...args) =>
-        ws.on("message", data => this.message(data, ws, ...args)),
+        ws.on("message", data => receiveProtocol(Bot, this, data, ws, ...args)),
       )
     }
   })(),

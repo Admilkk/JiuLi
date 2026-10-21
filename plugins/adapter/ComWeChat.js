@@ -1,5 +1,11 @@
 import cfg from "../../lib/config/config.js"
 import { ulid } from "ulid"
+import {
+  canBindAccount,
+  isAccountConnection,
+  parseProtocolEvent,
+  receiveProtocol,
+} from "../../lib/core/protocol-security.js"
 
 Bot.adapter.push(
   new (class ComWeChatAdapter {
@@ -17,7 +23,7 @@ Bot.adapter.push(
       const echo = ulid()
       const request = { action, params, echo }
       ws.sendMsg(request)
-      const cache = Promise.withResolvers()
+      const cache = { ...Promise.withResolvers(), ws }
       this.echo.set(echo, cache)
       const timeout = setTimeout(() => {
         cache.reject(Bot.makeError("请求超时", request, { timeout: this.timeout }))
@@ -291,6 +297,7 @@ Bot.adapter.push(
 
     async connect(data, ws) {
       for (const bot of data.status.bots) data.self_id = bot.self.user_id
+      if (!canBindAccount(Bot, this, data.self_id, ws)) return false
 
       Bot[data.self_id] = {
         adapter: this,
@@ -523,8 +530,7 @@ Bot.adapter.push(
         case "connect":
           break
         case "status_update":
-          this.connect(data, ws)
-          break
+          return this.connect(data, ws)
         default:
           Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
       }
@@ -532,10 +538,10 @@ Bot.adapter.push(
 
     message(data, ws) {
       try {
-        data = {
-          ...JSON.parse(data),
-          raw: Bot.String(data),
-        }
+        const raw = Bot.String(data)
+        data = parseProtocolEvent(data)
+        if (!data) return false
+        data.raw = raw
       } catch (err) {
         return Bot.makeLog("error", ["解码数据失败", data, err])
       }
@@ -547,7 +553,7 @@ Bot.adapter.push(
       }
 
       if (data.type) {
-        if (data.type !== "meta" && !Bot.uin.includes(data.self_id)) {
+        if (data.type !== "meta" && !isAccountConnection(Bot, this, data.self_id, ws)) {
           Bot.makeLog("warn", `找不到对应Bot，忽略消息：${logger.magenta(data.raw)}`, data.self_id)
           return false
         }
@@ -565,7 +571,7 @@ Bot.adapter.push(
         }
       } else if (data.echo) {
         const cache = this.echo.get(data.echo)
-        if (cache) return cache.resolve(data)
+        if (cache?.ws === ws) return cache.resolve(data)
       }
       Bot.makeLog("warn", `未知消息：${logger.magenta(data.raw)}`, data.self_id)
     }
@@ -573,7 +579,7 @@ Bot.adapter.push(
     load() {
       if (!Array.isArray(Bot.wsf[this.path])) Bot.wsf[this.path] = []
       Bot.wsf[this.path].push((ws, ...args) =>
-        ws.on("message", data => this.message(data, ws, ...args)),
+        ws.on("message", data => receiveProtocol(Bot, this, data, ws, ...args)),
       )
     }
   })(),

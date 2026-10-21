@@ -30,9 +30,13 @@ if (!fs.existsSync(new URL('./lib/core/start.js', import.meta.url))) {
 switch (process.env.app_type || process.argv[2]) {
   case 'stop': {
     const cfg = (await import('./lib/core/config/index.js')).default
-    await fetch(`http://localhost:${cfg.server.port}/exit`, {
-      headers: cfg.server.auth || undefined,
-    }).catch(() => {})
+    const { requestLocalStop } = await import('./lib/core/server-control.js')
+    try {
+      await requestLocalStop(cfg.server.port, cfg.server.auth)
+    } catch (err) {
+      console.error('停止服务失败：', err.message)
+      process.exit(1)
+    }
     process.exit()
   }
   case 'pm2':

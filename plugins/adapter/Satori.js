@@ -1,6 +1,7 @@
 import cfg from "../../lib/config/config.js"
 import fetch from "node-fetch"
 import { WebSocket } from "ws"
+import { redactUrl } from "../../lib/core/http-security.js"
 import { fileTypeFromBuffer } from "file-type"
 
 Bot.adapter.push(
@@ -574,10 +575,7 @@ Bot.adapter.push(
         oldWs.close()
       }
 
-      Bot.makeLog("info", `Satori WebSocket: ${this.wsEndpoint}`, "Satori")
-      if (this.token) {
-        Bot.makeLog("info", `Satori token: ${this.token}`, "Satori")
-      }
+      Bot.makeLog("info", `Satori WebSocket: ${redactUrl(this.wsEndpoint)}`, "Satori")
 
       const ws = new WebSocket(this.wsEndpoint)
       this.ws = ws

@@ -1,10 +1,26 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import lodash from 'lodash'
 import { JiuLiPlugin, cfg } from 'jiuli'
 
 /** 群词条缓存（module 级，供同一插件实例共享） */
-export const messageMap = {}
+export const messageMap = Object.create(null)
+
+function storageName(value) {
+  if (
+    !['string', 'number'].includes(typeof value) ||
+    !String(value) ||
+    ['.', '..'].includes(String(value)) ||
+    /[\0/\\]/.test(String(value)) ||
+    path.parse(String(value)).root
+  )
+    throw new Error('词条目录名称不合法')
+  return String(value)
+}
+
+const isRemoteFile = value =>
+  typeof value === 'string' && /^(?:https?:\/\/|base64:\/\/)/i.test(value)
 
 /**
  * 添加消息（词条）
@@ -74,12 +90,17 @@ export default class Add extends JiuLiPlugin {
     }
 
     if (this.e.isGroup) {
+      if (storageName(this.e.group_id) === 'global')
+        throw new Error('群号不能使用全局词条的保留名称')
       this.group_id = this.e.group_id
       redis.setEx(this.grpKey, 2592000, String(this.group_id))
       return this.group_id
     }
 
-    return (this.group_id = await redis.get(this.grpKey))
+    this.group_id = await redis.get(this.grpKey)
+    if (this.group_id && storageName(this.group_id) === 'global')
+      throw new Error('群号不能使用全局词条的保留名称')
+    return this.group_id
   }
 
   checkAuth() {
@@ -109,7 +130,11 @@ export default class Add extends JiuLiPlugin {
   /** 获取添加关键词 */
   getKeyWord() {
     this.e.isGlobal = Boolean(this.e.msg.match(/^#全局/))
-    this.keyWord = this.trimAlias(String(this.e.raw_message).replace(/#(全局)?(添加|删除)/, '').trim())
+    this.keyWord = this.trimAlias(
+      String(this.e.raw_message)
+        .replace(/#(全局)?(添加|删除)/, '')
+        .trim(),
+    )
   }
 
   /** 过滤别名 */
@@ -118,7 +143,8 @@ export default class Add extends JiuLiPlugin {
     let alias = groupCfg.botAlias
     if (!Array.isArray(alias)) alias = [alias]
 
-    for (const name of alias) if (name && msg.startsWith(name)) msg = lodash.trimStart(msg, name).trim()
+    for (const name of alias)
+      if (name && msg.startsWith(name)) msg = lodash.trimStart(msg, name).trim()
 
     return msg
   }
@@ -133,13 +159,15 @@ export default class Add extends JiuLiPlugin {
       this.finish('addContext')
       return this.reply('添加已失效，请重新添加')
     }
-    if (!this.isGlobal && this.e.isGroup && String(this.e.group_id) !== String(this.group_id)) return 'continue'
+    if (!this.isGlobal && this.e.isGroup && String(this.e.group_id) !== String(this.group_id))
+      return 'continue'
     this.keyWord = context.keyWord
 
     if (!this.e.msg?.includes('#结束添加')) {
-      for (const i of this.e.message) {
-        if (i.url) {
-          i.file = await this.saveFile(i)
+      for (const part of this.e.message) {
+        const i = { ...part }
+        if (i.url || i.file) {
+          i.file = await this.saveFile({ ...i, url: i.url || i.file })
           delete i.url
           delete i.fid
         }
@@ -165,27 +193,65 @@ export default class Add extends JiuLiPlugin {
   }
 
   async saveJson() {
-    const obj = {}
-    for (const [k, v] of messageMap[this.group_id]) obj[k] = v
+    const obj = Object.fromEntries(messageMap[this.group_id])
     /** 运行期间数据目录被清理时自愈 */
     await Bot.mkdir(this.path)
-    await fs.writeFile(`${this.path}${this.group_id}.json`, JSON.stringify(obj, '', '\t'))
+    await fs.writeFile(
+      await this.storagePath(`${storageName(this.group_id)}.json`),
+      JSON.stringify(obj, '', '\t'),
+    )
+  }
+
+  /** 包含历史附件的读写删除都受根目录约束，同时拒绝符号链接逃逸。 */
+  async storagePath(relative) {
+    if (typeof relative !== 'string' || !relative || relative.includes('\0'))
+      throw new Error('词条文件路径不合法')
+    const root = path.resolve(this.path)
+    const target = path.resolve(root, relative)
+    const within = (base, file) => {
+      const name = path.relative(base, file)
+      return !path.isAbsolute(name) && name !== '..' && !name.startsWith(`..${path.sep}`)
+    }
+    if (target === root || !within(root, target)) throw new Error('词条文件不能位于存储目录之外')
+    await fs.mkdir(root, { recursive: true })
+    let existing = target
+    while (true) {
+      try {
+        await fs.lstat(existing)
+        break
+      } catch (err) {
+        if (err.code !== 'ENOENT' || existing === root) throw err
+        existing = path.dirname(existing)
+      }
+    }
+    if (!within(await fs.realpath(root), await fs.realpath(existing)))
+      throw new Error('词条文件不能通过符号链接访问存储目录之外')
+    return target
   }
 
   async saveFile(data) {
+    const group = storageName(this.group_id)
+    const type = storageName(data.type)
+    if (!isRemoteFile(data.url) && !Buffer.isBuffer(data.url))
+      throw new Error('词条附件不能读取服务器本地文件')
     const file = await Bot.fileType({ ...data, file: data.url })
     if (Buffer.isBuffer(file.buffer)) {
-      file.name = `${this.group_id}/${data.type}/${file.name}`
-      file.path = `${this.path}${file.name}`
-      await Bot.mkdir(path.dirname(file.path))
-      await fs.writeFile(file.path, file.buffer)
-      return file.name
+      const ext = file.type?.ext || path.extname(String(file.name || '')).slice(1)
+      const name = `${randomUUID()}${/^[a-z\d]{1,16}$/i.test(ext) ? `.${ext}` : ''}`
+      const relative = `${group}/${type}/${name}`
+      const target = await this.storagePath(relative)
+      await Bot.mkdir(path.dirname(target))
+      await fs.writeFile(target, file.buffer, { flag: 'wx' })
+      return relative
     }
     return data.url
   }
 
   getKeyWordMsg(keyWord) {
-    return [...(messageMap[this.group_id].get(keyWord) || []), ...(messageMap.global.get(keyWord) || [])]
+    return [
+      ...(messageMap[this.group_id].get(keyWord) || []),
+      ...(messageMap.global.get(keyWord) || []),
+    ]
   }
 
   /** 匹配词条并回复（无匹配返回 false 继续后续规则） */
@@ -223,9 +289,17 @@ export default class Add extends JiuLiPlugin {
     if (lodash.isEmpty(msg)) return false
 
     msg = [...msg]
-    for (const i in msg)
-      if (msg[i].file && (await Bot.fsStat(`${this.path}${msg[i].file}`)))
-        msg[i] = { ...msg[i], file: `${this.path}${msg[i].file}` }
+    for (const i in msg) {
+      if (!msg[i].file || isRemoteFile(msg[i].file)) continue
+      let file
+      try {
+        file = await this.storagePath(msg[i].file)
+      } catch {
+        return this.reply('词条文件路径不合法，请重新添加')
+      }
+      if (!(await Bot.fsStat(file))) return this.reply('词条文件已失效，请重新添加')
+      msg[i] = { ...msg[i], file }
+    }
 
     Bot.makeLog('mark', `[发送消息]${this.e.logText}[${this.keyWord}]`, 'Add')
     const groupCfg = cfg.getGroup(this.e.self_id, this.group_id)
@@ -237,10 +311,11 @@ export default class Add extends JiuLiPlugin {
 
   /** 初始化已添加内容 */
   async initMessageMap() {
+    const name = storageName(this.group_id)
     if (messageMap[this.group_id]) return
+    const file = await this.storagePath(`${name}.json`)
     messageMap[this.group_id] = new Map()
 
-    const file = `${this.path}${this.group_id}.json`
     if (!(await Bot.fsStat(file))) return
 
     try {
@@ -256,7 +331,7 @@ export default class Add extends JiuLiPlugin {
     if (messageMap.global) return
     messageMap.global = new Map()
 
-    const globalPath = `${this.path}global.json`
+    const globalPath = await this.storagePath('global.json')
     if (!(await Bot.fsStat(globalPath))) return
 
     try {
@@ -268,7 +343,11 @@ export default class Add extends JiuLiPlugin {
   }
 
   delFile(msg) {
-    return Promise.allSettled(msg.map(i => i.file && fs.rm(`${this.path}${i.file}`)))
+    return Promise.allSettled(
+      msg.map(async i => {
+        if (i.file && !isRemoteFile(i.file)) await fs.rm(await this.storagePath(i.file))
+      }),
+    )
   }
 
   /** #删除 */
@@ -283,7 +362,9 @@ export default class Add extends JiuLiPlugin {
     if (!this.keyWord) return this.reply('删除错误：没有关键词')
 
     if (messageMap[this.group_id].has(this.keyWord)) {
-      await Promise.allSettled(messageMap[this.group_id].get(this.keyWord).map(this.delFile.bind(this)))
+      await Promise.allSettled(
+        messageMap[this.group_id].get(this.keyWord).map(this.delFile.bind(this)),
+      )
       messageMap[this.group_id].delete(this.keyWord)
       await this.saveJson()
       return this.reply(`删除成功：${this.keyWord}`)
@@ -330,7 +411,8 @@ export default class Add extends JiuLiPlugin {
 
     let arr = []
     if (type == 'list')
-      for (const [k, v] of messageMap[this.group_id]) arr.push({ key: k, val: v, num: arr.length + 1 })
+      for (const [k, v] of messageMap[this.group_id])
+        arr.push({ key: k, val: v, num: arr.length + 1 })
     else
       for (const [k, v] of messageMap[this.group_id])
         if (k.includes(search)) arr.push({ key: k, val: v, num: arr.length + 1 })
@@ -355,7 +437,8 @@ export default class Add extends JiuLiPlugin {
     if (type == 'search') title = `消息${search}：共${count}条`
 
     msg = [title, msg.join('\n')]
-    if (type == 'list' && count > 100) msg.push(`更多内容请翻页查看\n如：#消息列表${Number(page) + 1}`)
+    if (type == 'list' && count > 100)
+      msg.push(`更多内容请翻页查看\n如：#消息列表${Number(page) + 1}`)
 
     return this.reply(await Bot.makeForwardArray(msg))
   }
@@ -363,6 +446,8 @@ export default class Add extends JiuLiPlugin {
   /** 分页 */
   pagination(pageNo, pageSize, array) {
     const offset = (pageNo - 1) * pageSize
-    return offset + pageSize >= array.length ? array.slice(offset, array.length) : array.slice(offset, offset + pageSize)
+    return offset + pageSize >= array.length
+      ? array.slice(offset, array.length)
+      : array.slice(offset, offset + pageSize)
   }
 }
